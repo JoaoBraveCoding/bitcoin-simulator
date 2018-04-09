@@ -1,8 +1,12 @@
 # Misc. stats and plotting utils.
 # Miguel Matos - mm@gsd.inesc-id.pt
 # (c) 2012-2017
-
+import _pickle as cPickle
 import math
+import random
+
+from pip import logger
+
 
 def computeCDF(data,precision=1000):
 	import numpypy
@@ -76,7 +80,7 @@ def computeAverage(data):
 		
 		dataAverage = map(lambda x : x /  (itens + 0.), dataAverage)
 	else:
-		print 'Single Run.'
+		print ('Single Run.')
 		dataAverage = data[0]
 
 	return dataAverage
@@ -166,7 +170,7 @@ def checkLatencyNodes(latencyTable, nbNodes, defaultLatency=None):
     global latencyValue
 
     if latencyTable == None and defaultLatency != None:
-        print 'WARNING: using constant latency'
+        print ('WARNING: using constant latency')
         latencyTable = {n: {m: defaultLatency for m in range(nbNodes)} for n in range(nbNodes)}
         # latencyTable = {n : {m: random.randint(0,defaultLatency)for m in range(nbNodes)} for n in range(nbNodes) }
         return latencyTable
@@ -191,7 +195,7 @@ def checkLatencyNodes(latencyTable, nbNodes, defaultLatency=None):
         # FIXME: we should also remove some other nodes to be more faithful to the original distribution
 
         with open('/tmp/latencyTable.obj', 'w') as f:
-            cPickle.dump(latencyTable, f)
+			cPickle.dump(latencyTable, f)
 
     return latencyTable
 

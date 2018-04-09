@@ -10,7 +10,7 @@ import random
 import sys
 import os
 import yaml
-import cPickle
+import _pickle as cPickle
 import logging
 
 from sim import sim
@@ -138,7 +138,7 @@ def configure(config):
     nodeDrift = int(nodeCycle * float(config['NODE_DRIFT']))
 
     nodeState = defaultdict()
-    for n in xrange(nbNodes):
+    for n in range(nbNodes):
         nodeState[n] = createNode()
 
     sim.init(nodeCycle, nodeDrift, latencyTable, latencyDrift)
