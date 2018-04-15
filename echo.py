@@ -51,20 +51,133 @@ def CYCLE(myself):
     # assume global view
     if random.random() <= probBroadcast:
         target = random.choice(nodeState.keys())
-        sim.send(HELLO, target, myself, "hello, i am {}".format(myself), "hello")
+        sim.send(VERSION, target, myself, "hello, i am {} and I'm running version XX".format(myself), "Version")
 
         nodeState[myself][MSGS_SENT] += 1
 
 
-def HELLO(myself, source, msg1, msg2):
+def VERSION(myself, source, msg1, msg2):
     global nodeState
 
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(HELLO_REPLY, source, myself, "hello reply, i am {}".format(myself), "hello to you too")
+    sim.send(VERACK, source, myself, "hello, i am {} here is a verack".format(myself), "VerAck")
 
 
-def HELLO_REPLY(myself, source, msg1, msg2):
+def VERACK(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def GETADDR(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(ADDR, source, myself, "Here are my addresses", "Addr")
+
+
+def ADDR(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def PING(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(PONG, source, myself, "Pong", "Pong")
+
+
+def PONG(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def SENDCMPT(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def FEEFILTER(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def INV(myself, source, msg1, msg2):
+    global nodeState
+    # TODO it does send inventory not headers
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(HEADERS, source, myself, "Here are my headers", "Headers")
+
+
+def SENDHEADERS(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(HEADERS, source, myself, "Here are my headers", "Headers")
+
+
+def GETHEADERS(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(HEADERS, source, myself, "Here are my headers", "Headers")
+
+
+def HEADERS(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(GETDATA, source, myself, "Give me these blocks", "Getdata")
+
+
+def GETDATA(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(BLOCK, source, myself, "These are the blocks requested", "Block")
+
+
+def BLOCK(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def CMPCTBLOCK(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+
+
+def GETBLOCKTXN(myself, source, msg1, msg2):
+    global nodeState
+
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    nodeState[myself][MSGS_RECEIVED] += 1
+    sim.send(BLOCKTXN, source, myself, "These are the transactions requested", "Block")
+
+
+def BLOCKTXN(myself, source, msg1, msg2):
     global nodeState
 
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
@@ -105,7 +218,6 @@ def createNode():
     global MSGS_SENT
 
     CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT = 0, 1, 2
-
     return [0, 0, 0]
 
 
