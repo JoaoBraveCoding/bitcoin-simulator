@@ -7,6 +7,7 @@ import math
 import random
 import sys
 import os
+
 import yaml
 import cPickle
 import logging
@@ -31,7 +32,7 @@ def init():
 
 
 def CYCLE(myself):
-    global nodeState
+    global nodeState, block_id
 
     # with churn the node might be gone
     if myself not in nodeState:
@@ -50,69 +51,11 @@ def CYCLE(myself):
     # select random node to send message
     # assume global view
     if random.random() <= probBroadcast:
-        target = random.choice(nodeState.keys())
-        sim.send(VERSION, target, myself, "hello, i am {} and I'm running version XX".format(myself), "Version")
-
-        nodeState[myself][MSGS_SENT] += 1
-
-
-def VERSION(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(VERACK, source, myself, "hello, i am {} here is a verack".format(myself), "VerAck")
-
-
-def VERACK(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-
-
-def GETADDR(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(ADDR, source, myself, "Here are my addresses", "Addr")
-
-
-def ADDR(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-
-
-def PING(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(PONG, source, myself, "Pong", "Pong")
-
-
-def PONG(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-
-
-def SENDCMPT(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-
-
-def FEEFILTER(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
+        nodeState[myself][RECEIVED_BLOCKS].append(block_id)
+        for target in nodeState[myself][NEIGHBOURHOOD]:
+            sim.send(INV, target, myself, "hello, i am {} and I have this header".format(myself), block_id)
+            nodeState[myself][MSGS_SENT] += 1
+        # block_id += 1
 
 
 def INV(myself, source, msg1, msg2):
@@ -120,15 +63,8 @@ def INV(myself, source, msg1, msg2):
     # TODO it does send inventory not headers
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(HEADERS, source, myself, "Here are my headers", "Headers")
-
-
-def SENDHEADERS(myself, source, msg1, msg2):
-    global nodeState
-
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
-    nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(HEADERS, source, myself, "Here are my headers", "Headers")
+    if msg2 not in nodeState[myself][RECEIVED_BLOCKS]:
+        sim.send(GETHEADERS, source, myself, "Give me your headers", msg2)
 
 
 def GETHEADERS(myself, source, msg1, msg2):
@@ -136,7 +72,7 @@ def GETHEADERS(myself, source, msg1, msg2):
 
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(HEADERS, source, myself, "Here are my headers", "Headers")
+    sim.send(HEADERS, source, myself, "Here are my headers", msg2)
 
 
 def HEADERS(myself, source, msg1, msg2):
@@ -144,7 +80,7 @@ def HEADERS(myself, source, msg1, msg2):
 
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(GETDATA, source, myself, "Give me these blocks", "Getdata")
+    sim.send(GETDATA, source, myself, "Give me these blocks", msg2)
 
 
 def GETDATA(myself, source, msg1, msg2):
@@ -152,14 +88,20 @@ def GETDATA(myself, source, msg1, msg2):
 
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(BLOCK, source, myself, "These are the blocks requested", "Block")
+    sim.send(BLOCK, source, myself, "These are the blocks requested", msg2)
 
 
-def BLOCK(myself, source, msg1, msg2):
+def BLOCK(myself, source, msg1, block_id):
     global nodeState
 
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
     nodeState[myself][MSGS_RECEIVED] += 1
+    if block_id not in nodeState[myself][RECEIVED_BLOCKS]:
+        nodeState[myself][RECEIVED_BLOCKS].append(block_id)
+        for target in nodeState[myself][NEIGHBOURHOOD]:
+            if target != source:
+                sim.send(INV, target, myself, "hello, i am {} and I have this headers".format(myself), block_id)
+                nodeState[myself][MSGS_SENT] += 1
 
 
 def CMPCTBLOCK(myself, source, msg1, msg2):
@@ -191,6 +133,7 @@ def wrapup():
 
     receivedMessages = map(lambda x: nodeState[x][MSGS_RECEIVED], nodeState)
     sentMessages = map(lambda x: nodeState[x][MSGS_SENT], nodeState)
+    receivedBlocks = map(lambda x: nodeState[x][RECEIVED_BLOCKS], nodeState)
 
     # gather some stats, see utils for more functions
     logger.info("receivedMessages {}".format(receivedMessages))
@@ -201,8 +144,9 @@ def wrapup():
         "sentMessages min: {}, max: {}, total: {}".format(min(sentMessages), max(sentMessages), sum(receivedMessages)))
 
     # dump data into gnuplot format
-    utils.dumpAsGnuplot([receivedMessages, sentMessages], dumpPath + '/messages-' + str(runId) + '.gpData',
-                        ['#receivedMessages sentMessages'])
+    utils.dumpAsGnuplot([receivedMessages, sentMessages, receivedBlocks],
+                        dumpPath + '/messages-' + str(runId) + '.gpData',
+                        ['receivedMessages sentMessages receivedBlocks'])
 
     # dump data for later processing
     with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
@@ -210,19 +154,21 @@ def wrapup():
         cPickle.dump(sentMessages, f)
 
 
-def createNode():
+def createNode(neighbourhood):
     # maintain the node state as a list with the required variables
     # a dictionary is more readable but performance drop is considerable
     global CURRENT_CYCLE
     global MSGS_RECEIVED
     global MSGS_SENT
+    global NEIGHBOURHOOD
+    global RECEIVED_BLOCKS
 
-    CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT = 0, 1, 2
-    return [0, 0, 0]
+    CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NEIGHBOURHOOD, RECEIVED_BLOCKS = 0, 1, 2, 3, 4
+    return [0, 0, 0, neighbourhood, []]
 
 
 def configure(config):
-    global nbNodes, nbCycles, probBroadcast, nodeState, nodeCycle
+    global nbNodes, nbCycles, probBroadcast, nodeState, nodeCycle, block_id
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -255,10 +201,15 @@ def configure(config):
     nodeCycle = int(config['NODE_CYCLE'])
     rawNodeDrift = float(config['NODE_DRIFT'])
     nodeDrift = int(nodeCycle * float(config['NODE_DRIFT']))
+    neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
 
+    block_id = 0
     nodeState = defaultdict()
     for n in xrange(nbNodes):
-        nodeState[n] = createNode()
+        neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
+        while neighbourhood.__contains__(n):
+            neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
+        nodeState[n] = createNode(neighbourhood)
 
     sim.init(nodeCycle, nodeDrift, latencyTable, latencyDrift)
 
