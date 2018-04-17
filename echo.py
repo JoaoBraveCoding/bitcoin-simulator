@@ -32,7 +32,7 @@ def init():
 
 
 def CYCLE(myself):
-    global nodeState, block_id
+    global nodeState, block_id, max_block_number
 
     # with churn the node might be gone
     if myself not in nodeState:
@@ -50,21 +50,24 @@ def CYCLE(myself):
 
     # select random node to send message
     # assume global view
-    if random.random() <= probBroadcast:
+    if random.random() <= probBroadcast and block_id < max_block_number:
         nodeState[myself][RECEIVED_BLOCKS].append(block_id)
         for target in nodeState[myself][NEIGHBOURHOOD]:
             sim.send(INV, target, myself, "hello, i am {} and I have this header".format(myself), block_id)
+            nodeState[myself][BLOCKS_AVAILABILITY].setdefault(target, []).append(block_id)
             nodeState[myself][MSGS_SENT] += 1
-        # block_id += 1
+        block_id += 1
 
 
-def INV(myself, source, msg1, msg2):
+def INV(myself, source, msg1, block_id):
     global nodeState
+    nodeState[myself][BLOCKS_AVAILABILITY].setdefault(source, []).append(block_id)
+
     # TODO it does send inventory not headers
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
     nodeState[myself][MSGS_RECEIVED] += 1
-    if msg2 not in nodeState[myself][RECEIVED_BLOCKS]:
-        sim.send(GETHEADERS, source, myself, "Give me your headers", msg2)
+    if block_id not in nodeState[myself][RECEIVED_BLOCKS]:
+        sim.send(GETHEADERS, source, myself, "Give me your headers", block_id)
 
 
 def GETHEADERS(myself, source, msg1, msg2):
@@ -89,6 +92,7 @@ def GETDATA(myself, source, msg1, msg2):
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
     nodeState[myself][MSGS_RECEIVED] += 1
     sim.send(BLOCK, source, myself, "These are the blocks requested", msg2)
+    nodeState[myself][BLOCKS_AVAILABILITY].setdefault(source, []).append(msg2)
 
 
 def BLOCK(myself, source, msg1, block_id):
@@ -96,19 +100,29 @@ def BLOCK(myself, source, msg1, block_id):
 
     logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
     nodeState[myself][MSGS_RECEIVED] += 1
+    PROCESSBLOCK(myself, source, block_id)
+
+
+def PROCESSBLOCK(myself, source, block_id):
     if block_id not in nodeState[myself][RECEIVED_BLOCKS]:
         nodeState[myself][RECEIVED_BLOCKS].append(block_id)
         for target in nodeState[myself][NEIGHBOURHOOD]:
-            if target != source:
+            if target == source:
+                continue
+            if target in nodeState[myself][BLOCKS_AVAILABILITY] and block_id-1 in nodeState[myself][BLOCKS_AVAILABILITY][target]:
+                sim.send(CMPCTBLOCK, target, myself, "Here it is the most recent block".format(myself), block_id)
+                nodeState[myself][BLOCKS_AVAILABILITY].setdefault(target, []).append(block_id)
+            else:
                 sim.send(INV, target, myself, "hello, i am {} and I have this headers".format(myself), block_id)
-                nodeState[myself][MSGS_SENT] += 1
+            nodeState[myself][MSGS_SENT] += 1
 
 
-def CMPCTBLOCK(myself, source, msg1, msg2):
+def CMPCTBLOCK(myself, source, msg1, block_id):
     global nodeState
 
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, msg2))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
     nodeState[myself][MSGS_RECEIVED] += 1
+    PROCESSBLOCK(myself, source, block_id)
 
 
 def GETBLOCKTXN(myself, source, msg1, msg2):
@@ -162,13 +176,14 @@ def createNode(neighbourhood):
     global MSGS_SENT
     global NEIGHBOURHOOD
     global RECEIVED_BLOCKS
+    global BLOCKS_AVAILABILITY
 
-    CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NEIGHBOURHOOD, RECEIVED_BLOCKS = 0, 1, 2, 3, 4
-    return [0, 0, 0, neighbourhood, []]
+    CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NEIGHBOURHOOD, RECEIVED_BLOCKS, BLOCKS_AVAILABILITY = 0, 1, 2, 3, 4, 5
+    return [0, 0, 0, neighbourhood, [], {}]
 
 
 def configure(config):
-    global nbNodes, nbCycles, probBroadcast, nodeState, nodeCycle, block_id
+    global nbNodes, nbCycles, probBroadcast, nodeState, nodeCycle, block_id, max_block_number
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -204,6 +219,7 @@ def configure(config):
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
 
     block_id = 0
+    max_block_number = int(config['MAX_NUMBER_OF_BLOCKS'])
     nodeState = defaultdict()
     for n in xrange(nbNodes):
         neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
