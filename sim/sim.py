@@ -6,6 +6,7 @@
 import sys
 import heapq
 import random
+import traceback
 
 messagesTotal = 0
 messagesSent = 0
@@ -130,7 +131,9 @@ def run():
         # if cnt%1000==0:
         # 	logger.info(" {} events queued \t {} events done\t timestamp: %d           ".format(len(queue),cnt,timestamp))
     except Exception as e:
-        print "error:", e, " error-message:", sys.exc_info()
+        ex_type, ex, tb = sys.exc_info()
+        print "error:", e, " error-message:", ex_type, ex
+        traceback.print_tb(tb)
         print "queue", queue
         print 'Executed: %d events' % (cnt)
         sys.exit(10)

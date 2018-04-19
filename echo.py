@@ -74,63 +74,64 @@ def CYCLE(myself):
         # Not first block which means getting highest block to be the parent
         highest_block = None
         if not nodeState[myself][RECEIVED_BLOCKS]:
-            new_block = (block_id, -1, 0, time.time())
+            new_block = (block_id, -1, 0, time.time(), myself)
         else:
             highest_block = get_highest_block(myself)
-            new_block = (block_id, highest_block[0], highest_block[2] + 1, time.time())
+            new_block = (block_id, highest_block[0], highest_block[2] + 1, time.time(), myself)
 
         # Store the new block
         nodeState[myself][RECEIVED_BLOCKS].append(new_block)
 
         # Broadcast it
         for target in nodeState[myself][NEIGHBOURHOOD]:
-            if highest_block is not None and highest_block in nodeState[myself][BLOCKS_AVAILABILITY][target]:
+            if highest_block is not None and target in nodeState[myself][BLOCKS_AVAILABILITY].keys() \
+                    and highest_block in nodeState[myself][BLOCKS_AVAILABILITY][target]:
                 sim.send(CMPCTBLOCK, target, myself, "Here it is the most recent block".format(myself), new_block)
-                nodeState[myself][BLOCKS_AVAILABILITY].setdefault(target, []).append(block_id)
+                nodeState[myself][BLOCKS_AVAILABILITY].setdefault(target, []).append(new_block)
             else:
-                sim.send(INV, target, myself, "hello, i am {} and I have this header".format(myself), block_id)
+                sim.send(INV, target, myself, "hello, i am {} and I have this header".format(myself), new_block)
             nodeState[myself][MSGS_SENT] += 1
         block_id += 1
 
 
-def INV(myself, source, msg1, block_id):
+def INV(myself, source, msg1, new_block):
     global nodeState
-    nodeState[myself][BLOCKS_AVAILABILITY].setdefault(source, []).append((block_id, 0, 0, 0))
+    nodeState[myself][BLOCKS_AVAILABILITY].setdefault(source, []).append(new_block)
 
     # TODO it does send inventory not headers
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, new_block))
     nodeState[myself][MSGS_RECEIVED] += 1
-    if block_id not in [tpl[0] for tpl in nodeState[myself][RECEIVED_BLOCKS]]:
-        sim.send(GETHEADERS, source, myself, "Give me your headers", block_id)
+    if new_block not in nodeState[myself][RECEIVED_BLOCKS]:
+        sim.send(GETHEADERS, source, myself, "Give me your headers", new_block)
 
 
-def GETHEADERS(myself, source, msg1, block_id):
+def GETHEADERS(myself, source, msg1, new_block):
     global nodeState
 
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, new_block))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(HEADERS, source, myself, "Here are my headers", block_id)
+    sim.send(HEADERS, source, myself, "Here are my headers", new_block)
 
 
-def HEADERS(myself, source, msg1, block_id):
+def HEADERS(myself, source, msg1, new_block):
     global nodeState
 
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, new_block))
     nodeState[myself][MSGS_RECEIVED] += 1
-    sim.send(GETDATA, source, myself, "Give me these blocks", block_id)
+    sim.send(GETDATA, source, myself, "Give me these blocks", new_block)
 
 
-def GETDATA(myself, source, msg1, block_id):
+def GETDATA(myself, source, msg1, new_block):
     global nodeState
 
-    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, block_id))
+    logger.info("Node {} Received {} from {} with {}".format(myself, msg1, source, new_block))
     nodeState[myself][MSGS_RECEIVED] += 1
-    block_to_send = getBlock(myself, block_id)
+    block_to_send = new_block  # getBlock(myself, block_id)
     if block_to_send is not None:
         sim.send(BLOCK, source, myself, "These are the blocks requested", block_to_send)
         nodeState[myself][BLOCKS_AVAILABILITY].setdefault(source, []).append(block_to_send)
     else:
-        logger.info("Node {} Received {} from {} with {} INVALID REQUEST".format(myself, msg1, source, block_id))
+        logger.info("Node {} Received {} from {} with {} INVALID REQUEST".format(myself, msg1, source, new_block))
 
 
 def BLOCK(myself, source, msg1, block):
@@ -156,18 +157,22 @@ def PROCESSBLOCK(myself, source, block):
             if target == source:
                 continue
 
-            if target in nodeState[myself][BLOCKS_AVAILABILITY] and check_availability(myself, target, block[0]):
+            if target in nodeState[myself][BLOCKS_AVAILABILITY] and check_availability(myself, target, block[1]):
                 sim.send(CMPCTBLOCK, target, myself, "Here it is the most recent block".format(myself), block)
                 nodeState[myself][BLOCKS_AVAILABILITY].setdefault(target, []).append(block)
             else:
-                sim.send(INV, target, myself, "hello, i am {} and I have this headers".format(myself), block[0])
+                sim.send(INV, target, myself, "hello, i am {} and I have this headers".format(myself), block)
             nodeState[myself][MSGS_SENT] += 1
 
+
 def check_availability(myself, target, block_id):
+    if target not in nodeState[myself][BLOCKS_AVAILABILITY].keys():
+        return False
     for tpl in reversed(nodeState[myself][BLOCKS_AVAILABILITY][target]):
         if tpl[0] == block_id:
             return True
     return False
+
 
 def GETBLOCKTXN(myself, source, msg1, msg2):
     global nodeState
@@ -222,13 +227,15 @@ def createNode(neighbourhood):
     global NEIGHBOURHOOD
     global RECEIVED_BLOCKS
     global BLOCKS_AVAILABILITY
+    global MEMPOOL
 
-    CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NEIGHBOURHOOD, RECEIVED_BLOCKS, BLOCKS_AVAILABILITY = 0, 1, 2, 3, 4, 5
-    return [0, 0, 0, neighbourhood, [], {}]
+    CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NEIGHBOURHOOD, RECEIVED_BLOCKS, BLOCKS_AVAILABILITY, MEMPOOL \
+        = 0, 1, 2, 3, 4, 5, 6
+    return [0, 0, 0, neighbourhood, [], {}, [], []]
 
 
 def configure(config):
-    global nbNodes, nbCycles, probBroadcast, nodeState, nodeCycle, block_id, max_block_number
+    global nbNodes, nbCycles, probBroadcast, nodeState, nodeCycle, block_id, max_block_number, tx_id
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -264,6 +271,7 @@ def configure(config):
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
 
     block_id = 0
+    tx_id = 0
     max_block_number = int(config['MAX_NUMBER_OF_BLOCKS'])
     nodeState = defaultdict()
     for n in xrange(nbNodes):

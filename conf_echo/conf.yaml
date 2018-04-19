@@ -1,7 +1,7 @@
 # system settings, mandatory
-nbNodes : 20
+nbNodes : 50
 # number of simulation cycles
-nbCycles : 2
+nbCycles : 20
 # duration of node cycle
 NODE_CYCLE: 125
 # node cycle drift, zero means perfect clocks 
@@ -17,7 +17,7 @@ LATENCY_TABLE: 100
 LATENCY_DRIFT: None
 
 NEIGHBOURHOOD_SIZE: 8
-MAX_NUMBER_OF_BLOCKS: 1000000000
+MAX_NUMBER_OF_BLOCKS: 0
 # system settings, optional
 # whether to consider churn or not
 #CHURN : False
@@ -27,4 +27,4 @@ MAX_NUMBER_OF_BLOCKS: 1000000000
 #MESSASE_LOSS: 0.0
 
 #application specific settings
-probBroadcast : 1
+probBroadcast : 0.01
