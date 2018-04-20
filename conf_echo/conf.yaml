@@ -27,4 +27,6 @@ MAX_NUMBER_OF_BLOCKS: 0
 #MESSASE_LOSS: 0.0
 
 #application specific settings
-probBroadcast : 0.01
+PROB_GEN_BLOCK: 0.01
+
+PROB_GEN_TRANS: 1
