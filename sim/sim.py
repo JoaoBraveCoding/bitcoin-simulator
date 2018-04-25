@@ -134,7 +134,7 @@ def run():
         ex_type, ex, tb = sys.exc_info()
         print "error:", e, " error-message:", ex_type, ex
         traceback.print_tb(tb)
-        print "queue", queue
+        #print "queue", queue
         print 'Executed: %d events' % (cnt)
         sys.exit(10)
 

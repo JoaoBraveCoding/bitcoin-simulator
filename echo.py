@@ -81,6 +81,7 @@ def CYCLE(myself):
             sim.send(INV, target, myself, "hello, i am {} and I have this header".format(myself),
                      nodeState[myself][NODE_vINV_TX_TO_SEND])
             nodeState[myself][MSGS_SENT] += 1
+        nodeState[myself][NODE_vINV_TX_TO_SEND] = []
 
 
 def INV(myself, source, msg1, vInv):
@@ -101,13 +102,12 @@ def INV(myself, source, msg1, vInv):
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is None:
                 headers_to_request.append(inv[INV_CONTENT_ID])
-                # TODO this might have to be changed
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append((inv[INV_CONTENT_ID],))
+                update_availability(myself, source, (inv[INV_CONTENT_ID],))
             else:
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
-
+                update_availability(myself, source, block)
         else:
             logger.info("Node {} Received INV from {} INVALID INV!!!".format(myself, source))
+            raise ValueError('INV, else, node received invalid inv type this condition is not coded')
 
     if ask_for:
         sim.send(GETDATA, source, myself, "Give me these tx", ask_for)
@@ -129,6 +129,7 @@ def GETHEADERS(myself, source, msg1, get_headers):
             headers_to_send.append(get_block_header(block))
         else:
             logger.info("Node {} Received header from {} INVALID ID in header!!!".format(myself, source))
+            raise ValueError('GETHEADERS, else, node received invalid headerID')
 
     sim.send(HEADERS, source, myself, "Here are my headers", headers_to_send)
 
@@ -139,6 +140,7 @@ def HEADERS(myself, source, msg1, headers):
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     nodeState[myself][MSGS_RECEIVED] += 1
 
+    blocks = nodeState[myself][NODE_RECEIVED_BLOCKS]
     process_new_headers(myself, source, headers)
     data_to_request = get_data_to_request(myself, source)
     if len(data_to_request) <= 16:
@@ -172,7 +174,7 @@ def GETDATA(myself, source, msg1, requesting_data):
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is not None:
                 sim.send(BLOCK, source, myself, "These are the blocks requested", block)
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
+                update_availability(myself, source, block)
             else:
                 # TODO Fix me either way this shouldn't happen it / I happens every time a node has received multipl blocks from diff sources
                 logger.info(
@@ -201,20 +203,22 @@ def BLOCK(myself, source, msg1, block):
             # TODO implement re-branch
             nodeState[myself][NODE_CURRENT_BLOCK] = block
 
+        # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
         for tx in block[BLOCK_TX]:
             if tx in nodeState[myself][NODE_MEMPOOL]:
                 nodeState[myself][NODE_MEMPOOL].remove(tx)
-            # TODO Can also remove them here from vINV
+
+                for tx_to_rm in nodeState[myself][NODE_vINV_TX_TO_SEND]:
+                    if tx[TX_ID] == tx_to_rm[INV_CONTENT_ID]:
+                        nodeState[myself][NODE_vINV_TX_TO_SEND].remove(tx_to_rm)
+                        break
 
         # Update or create block availability for neighbourhood
-        #if source not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
-        #    nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
-        #else:
-        #    update_availability(myself, source, block)
+        update_availability(myself, source, block)
 
         # Broadcast new block
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if target == source:
+            if target == source and not check_availability(myself, source, block[BLOCK_ID]):
                 continue
 
             # if target in nodeState[myself][NODE_BLOCKS_AVAILABILITY] and check_availability(myself, target, block[1]):
@@ -227,6 +231,7 @@ def BLOCK(myself, source, msg1, block):
     else:
         # TODO Fix me either way this shouldn't happen
         logger.info("Node {} Received an unrequested full block from {} INVALID!!!".format(myself, source))
+        update_availability(myself, source, block)
         #raise ValueError('BLOCK, else, this condition is not coded and shouldn\'t happen')
 
 
@@ -292,7 +297,8 @@ def generate_new_block(myself):
         nodeState[myself][NODE_MEMPOOL] = []
     else:
         highest_block = nodeState[myself][NODE_CURRENT_BLOCK]
-        new_block = (block_id, highest_block[0], highest_block[2] + 1, time.time(), myself, nodeState[myself][NODE_MEMPOOL])
+        new_block = (block_id, highest_block[BLOCK_ID], highest_block[BLOCK_HEIGHT] + 1, time.time(), myself,
+                     nodeState[myself][NODE_MEMPOOL])
         nodeState[myself][NODE_MEMPOOL] = []
 
     # Store the new block
@@ -300,18 +306,6 @@ def generate_new_block(myself):
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block
     block_id += 1
     return new_block
-
-
-def get_highest_block(myself):
-    global nodeState
-
-    highest_block = None
-    for tpl in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
-        if highest_block is None or tpl[2] > highest_block[2] \
-                or (tpl[2] == highest_block[2] and tpl[3] < highest_block[3]):
-            highest_block = tpl
-
-    return highest_block
 
 
 def get_block(myself, block_id):
@@ -324,7 +318,7 @@ def get_block(myself, block_id):
 def update_block(myself, block):
     global nodeState
 
-    if not nodeState[myself][NODE_RECEIVED_BLOCKS] or len(nodeState[myself][NODE_RECEIVED_BLOCKS]) == 0:
+    if not nodeState[myself][NODE_RECEIVED_BLOCKS]:
         nodeState[myself][NODE_RECEIVED_BLOCKS].append(block)
         return
 
@@ -343,49 +337,26 @@ def get_block_header(block):
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE]
 
 
-def process_new_headers(myself, source, headers):
-    for header in headers:
-        header_in = get_block(myself, header[HEADER_ID])
-        parent_header_in = get_block(myself, header[HEADER_PARENT_ID])
-        if parent_header_in is None and header[HEADER_PARENT_ID] != -1:
-            # TODO Fix me
-            logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!".format(myself, header[HEADER_PARENT_ID]))
-            raise ValueError('process_new_headers, if parent_header_in is None, this condition is not coded')
+def update_availability(myself, source, block):
+    global nodeState
 
-        if header_in is None:
-            nodeState[myself][NODE_RECEIVED_BLOCKS].append(header)
-            # TODO this might need to be changed
-            update_availability(myself, source, header)
+    if source not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
+        nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
+        return
 
-        elif len(header_in) == 4 or (len(header_in) == 6 and parent_header_in is None):
-            update_availability(myself, source, header_in)
-            continue
+    i = len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][source]) - 1
+    while i >= 0:
+        if nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i][0] == block[0] and \
+                len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i]) > len(block):
+            nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i] = block
+            return
+        i = i - 1
 
-        else:
-            logger.info("Node {} Received a header with a parent_id and an id already known id={}".format(myself, header[HEADER_ID]))
-            update_availability(myself, source, header_in)
-            update_availability(myself, source, parent_header_in)
-
-
-def get_data_to_request(myself, source):
-    data_to_request = []
-    for block in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
-        if len(block) == 1 or len(block) == 6:
-            continue
-        elif len(block) == 4 and check_availability(myself, source, block[BLOCK_ID]):
-            #TODO IMPORTANT add list of requests already made
-            data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
-        elif len(block) == 4:
-            continue
-        else:
-            # TODO this shouldn't happen
-            raise ValueError("get_data_to_request, else, this condition is not coded and shouldn't happen")
-
-    return data_to_request
+    nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
 
 
 def check_availability(myself, target, block_id):
-    if target not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys() or len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][target]) == 0:
+    if target not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
         return False
     for tpl in reversed(nodeState[myself][NODE_BLOCKS_AVAILABILITY][target]):
         if tpl[0] == block_id:
@@ -409,20 +380,41 @@ def get_transaction(myself, tx_id):
     return None
 
 
-def update_availability(myself, source, block):
-    global nodeState
-    if source not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys() or len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][source]) == 0:
-        nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
-        return
+def process_new_headers(myself, source, headers):
+    for header in headers:
+        header_in = get_block(myself, header[HEADER_ID])
+        parent_header_in = get_block(myself, header[HEADER_PARENT_ID])
+        if parent_header_in is None and header[HEADER_PARENT_ID] != -1:
+            # TODO Fix me
+            logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!".format(myself, header[HEADER_PARENT_ID]))
+            raise ValueError('process_new_headers, if parent_header_in is None, this condition is not coded')
 
-    i = len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][source]) - 1
-    while i >= 0:
-        if nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i][0] == block[0]:
-            nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i] = block
-            return
-        i = i - 1
+        if header_in is None:
+            nodeState[myself][NODE_RECEIVED_BLOCKS].append(header)
+            update_availability(myself, source, header)
 
-    nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
+        elif header_in is not None and not check_availability(myself, source, header_in[BLOCK_ID]):
+            update_availability(myself, source, header_in)
+
+        if parent_header_in is not None and not check_availability(myself, source, parent_header_in[BLOCK_ID]):
+            update_availability(myself, source, parent_header_in)
+
+
+def get_data_to_request(myself, source):
+    data_to_request = []
+    for block in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
+        if len(block) == 6:
+            continue
+        elif len(block) == 4 and check_availability(myself, source, block[BLOCK_ID]):
+            #TODO IMPORTANT add list of requests already made
+            data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
+        elif len(block) == 4:
+            continue
+        else:
+            # TODO this shouldn't happen
+            raise ValueError("get_data_to_request, else, this condition is not coded and shouldn't happen")
+
+    return data_to_request
 
 
 def wrapup():
