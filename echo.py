@@ -23,7 +23,8 @@ INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
 
 CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NODE_CURRENT_BLOCK, NODE_NEIGHBOURHOOD, NODE_RECEIVED_BLOCKS, \
-    NODE_PARTIAL_BLOCKS, NODE_BLOCKS_AVAILABILITY, NODE_MEMPOOL, NODE_vINV_TX_TO_SEND = 0, 1, 2, 3, 4, 5, 6, 7, 9, 10
+    NODE_PARTIAL_BLOCKS, NODE_BLOCKS_AVAILABILITY, NODE_MEMPOOL, NODE_vINV_TX_TO_SEND, NODE_BLOCKS_ALREADY_REQUESTED,\
+    NODE_TX_ALREADY_REQUESTED = 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12
 
 
 def init():
@@ -94,8 +95,11 @@ def INV(myself, source, msg1, vInv):
     for inv in vInv:
         if inv[INV_TYPE] == "MSG_TX":
             tx = get_transaction(myself, inv[INV_CONTENT_ID])
-            if tx is None:
+            if tx is None and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
+                nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
+            elif tx is None:
+                continue;
 
         elif inv[INV_TYPE] == "MSG_BLOCK":
             block = get_block(myself, inv[INV_CONTENT_ID])
@@ -191,6 +195,9 @@ def BLOCK(myself, source, msg1, block):
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     nodeState[myself][MSGS_RECEIVED] += 1
 
+    if block[BLOCK_ID] in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
+        nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].remove(block[BLOCK_ID])
+
     process_block(myself, source, block)
 
 
@@ -203,10 +210,16 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
     # Check if we have all tx
     tx_to_request = []
     tx_in_block = []
+    missing_tx = False
     for mini_tx in cmpctblock[BLOCK_TX]:
         tx = get_transaction(myself, mini_tx)
-        if tx is None:
+        if tx is None and mini_tx not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             tx_to_request.append(mini_tx)
+            nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(mini_tx)
+            missing_tx = True
+        elif tx is None:
+            missing_tx = True
+            continue
         else:
             tx_in_block.append(tx)
 
@@ -216,10 +229,11 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
             nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock)
         return
 
-    block = (cmpctblock[BLOCK_ID], cmpctblock[BLOCK_PARENT_ID], cmpctblock[BLOCK_HEIGHT], cmpctblock[BLOCK_TIMESTAMP],
+    if not missing_tx:
+        block = (cmpctblock[BLOCK_ID], cmpctblock[BLOCK_PARENT_ID], cmpctblock[BLOCK_HEIGHT], cmpctblock[BLOCK_TIMESTAMP],
              cmpctblock[BLOCK_GEN_NODE], tx_in_block)
 
-    process_block(myself, source, block)
+        process_block(myself, source, block)
 
 
 def GETBLOCKTXN(myself, source, msg1, tx_request):
@@ -256,6 +270,8 @@ def BLOCKTXN(myself, source, msg1, tx_requested):
     for tx in tx_requested[1]:
         if tx not in nodeState[myself][NODE_MEMPOOL]:
             nodeState[myself][NODE_MEMPOOL].append(tx)
+            if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+                nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
         else:
             logger.info("Node {} Received tx in BLOCKTXN that already had from {} INVALID!!!".format(myself, source))
             # raise ValueError('BLOCKTXN, else, this condition is not coded, already known tx')
@@ -268,6 +284,9 @@ def TX(myself, source, msg1, tx):
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     nodeState[myself][MSGS_RECEIVED] += 1
+
+    if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+        nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
 
     check_tx = get_transaction(myself, tx[TX_ID])
     if check_tx is None:
@@ -304,7 +323,7 @@ def get_block(myself, block_id):
 
 
 def process_block(myself, source, block):
-    # TODO check if cmpt block is broadcast only when it's higher
+    # TODO check if cmpct block is broadcast only when it's higher
     # Check if it's a new block
     if block not in nodeState[myself][NODE_RECEIVED_BLOCKS]:
         update_block(myself, block)
@@ -342,7 +361,7 @@ def process_block(myself, source, block):
     else:
         # TODO Fix me either way this shouldn't happen IMPORTANT
         logger.info("Node {} Received an unrequested full block from {} INVALID!!!".format(myself, source))
-        # raise ValueError('BLOCK, else, this condition is not coded and shouldn\'t happen')
+        #raise ValueError('BLOCK, else, this condition is not coded and shouldn\'t happen')
 
 
 def update_block(myself, block):
@@ -366,6 +385,8 @@ def update_block(myself, block):
 def cmpctblock(block):
     cmpct_tx = []
     for tx in block[BLOCK_TX]:
+        if tx is None:
+            print("pog")
         cmpct_tx.append(tx[TX_ID])
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx
 
@@ -473,9 +494,12 @@ def get_data_to_request(myself, source):
     for block in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
         if len(block) == 6:
             continue
-        elif len(block) == 4 and check_availability(myself, source, block[BLOCK_ID]):
+        elif len(block) == 4 and check_availability(myself, source, block[BLOCK_ID]) and \
+                block[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
             #TODO IMPORTANT add list of requests already made
             data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
+            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].append(block[BLOCK_ID])
+
         elif len(block) == 4:
             continue
         else:
@@ -518,7 +542,7 @@ def wrapup():
 
 
 def createNode(neighbourhood):
-    return [0, 0, 0, None, neighbourhood, [], [], {}, [], [], []]
+    return [0, 0, 0, None, neighbourhood, [], [], {}, [], [], [], [], []]
 
 
 def configure(config):
