@@ -11,20 +11,24 @@ import os
 import yaml
 import cPickle
 import logging
-
+import numpy
 from sim import sim
 import utils
 
 LOG_TO_FILE = False
 
-BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX = 0, 1, 2, 3, 4, 5
+BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_EXTRA_TX = 0, 1, 2, 3, 4, 5, 6
 TX_ID, TX_CONTENT, TX_GEN_NODE = 0, 1, 2
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
 
-CURRENT_CYCLE, MSGS_RECEIVED, MSGS_SENT, NODE_CURRENT_BLOCK, NODE_NEIGHBOURHOOD, NODE_RECEIVED_BLOCKS, \
-    NODE_PARTIAL_BLOCKS, NODE_BLOCKS_AVAILABILITY, NODE_MEMPOOL, NODE_vINV_TX_TO_SEND, NODE_BLOCKS_ALREADY_REQUESTED,\
-    NODE_TX_ALREADY_REQUESTED = 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12
+CURRENT_CYCLE, INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, \
+TX_MSG, NODE_CURRENT_BLOCK, NODE_NEIGHBOURHOOD, NODE_RECEIVED_BLOCKS, NODE_PARTIAL_BLOCKS, NODE_BLOCKS_AVAILABILITY, \
+NODE_MEMPOOL, NODE_vINV_TX_TO_SEND, NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, LAST_TIME \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+
+
+SENT, RECEIVED = 0, 1
 
 
 def init():
@@ -51,6 +55,7 @@ def CYCLE(myself):
     if myself == 0:
         logger.info('node {} cycle {}'.format(myself, nodeState[myself][CURRENT_CYCLE]))
 
+    n = get_nb_of_tx_to_gen(len(nodeState), nodeState[myself][CURRENT_CYCLE])
     nodeState[myself][CURRENT_CYCLE] += 1
 
     # schedule next execution
@@ -58,37 +63,53 @@ def CYCLE(myself):
         sim.schedulleExecution(CYCLE, myself)
 
     # If a node can generate transactions
-    if random.random() <= prob_generating_trans:
+    i = 0
+    while i < n:
         generate_new_tx(myself)
+        i = i + 1
 
     # If the node can generate a block
-    if random.random() <= prob_generating_block and (max_block_number == 0 or block_id < max_block_number):
+    # (1-math.exp(-nodeState[myself][LAST_TIME]/10))
+
+
+    Y = 1 - 10 * numpy.random.exponential(10)
+    while Y < 0:
+        Y = 1 - 10 * numpy.random.exponential(10)
+
+    # (1-math.exp(-nodeState[myself][LAST_TIME]/10))
+    # Y > 0.9
+    # random.random() < prob_generating_block
+    if Y > 0.9 and (max_block_number == 0 or block_id < max_block_number):
         new_block = generate_new_block(myself)
 
         # Check if can send as cmpct or send through inv
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
             if nodeState[myself][NODE_CURRENT_BLOCK] is not None and check_availability(myself, target, NODE_CURRENT_BLOCK):
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(new_block))
+                nodeState[myself][CMPCTBLOCK_MSG][SENT] += 1
                 nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(new_block)
 
             else:
                 vInv = [("MSG_BLOCK", new_block[BLOCK_ID])]
                 sim.send(INV, target, myself, "INV", vInv)
-            nodeState[myself][MSGS_SENT] += 1
+                nodeState[myself][INV_MSG][SENT] += 1
 
     # Send new transactions either created or received
-    if not nodeState[myself][NODE_vINV_TX_TO_SEND]:
+    if nodeState[myself][NODE_vINV_TX_TO_SEND]:
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
             sim.send(INV, target, myself, "INV", nodeState[myself][NODE_vINV_TX_TO_SEND])
-            nodeState[myself][MSGS_SENT] += 1
+            nodeState[myself][INV_MSG][SENT] += 1
+
         nodeState[myself][NODE_vINV_TX_TO_SEND] = []
+
+    nodeState[myself][LAST_TIME] = nodeState[myself][LAST_TIME] + 1
 
 
 def INV(myself, source, msg1, vInv):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][INV_MSG][RECEIVED] += 1
 
     ask_for = []
     headers_to_request = []
@@ -99,7 +120,7 @@ def INV(myself, source, msg1, vInv):
                 ask_for.append(inv)
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
             elif tx is None:
-                continue;
+                continue
 
         elif inv[INV_TYPE] == "MSG_BLOCK":
             block = get_block(myself, inv[INV_CONTENT_ID])
@@ -114,16 +135,18 @@ def INV(myself, source, msg1, vInv):
 
     if ask_for:
         sim.send(GETDATA, source, myself, "GETDATA", ask_for)
+        nodeState[myself][GETDATA_MSG][SENT] += 1
 
     if headers_to_request:
         sim.send(GETHEADERS, source, myself, "GETHEADERS", headers_to_request)
+        nodeState[myself][GETHEADERS_MSG][SENT] += 1
 
 
 def GETHEADERS(myself, source, msg1, get_headers):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][GETHEADERS_MSG][RECEIVED] += 1
 
     headers_to_send = []
     for id in get_headers:
@@ -135,19 +158,21 @@ def GETHEADERS(myself, source, msg1, get_headers):
             raise ValueError('GETHEADERS, else, node received invalid headerID')
 
     sim.send(HEADERS, source, myself, "HEADERS", headers_to_send)
+    nodeState[myself][HEADERS_MSG][SENT] += 1
 
 
 def HEADERS(myself, source, msg1, headers):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][HEADERS_MSG][RECEIVED] += 1
 
     process_new_headers(myself, source, headers)
     data_to_request = get_data_to_request(myself, source)
     if len(data_to_request) <= 16:
         # If is a new block in the main chain try and direct fetch
         sim.send(GETDATA, source, myself, "GETDATA", data_to_request)
+        nodeState[myself][GETDATA_MSG][SENT] += 1
     else:
         # Else rely on other means of download
         # TODO Fix this case still don't know how it's done
@@ -159,32 +184,34 @@ def GETDATA(myself, source, msg1, requesting_data):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][GETDATA_MSG][RECEIVED] += 1
 
     for inv in requesting_data:
         if inv[INV_TYPE] == "MSG_TX":
             tx = get_transaction(myself, inv[INV_CONTENT_ID])
             if tx is not None:
                 sim.send(TX, source, myself, "TX", tx)
+                nodeState[myself][TX_MSG][SENT] += 1
             else:
-                # TODO Fix me either way this shouldn't happen
+                # This shouldn't happen in a simulated scenario
                 logger.info(
                     "Node {} Received more invalid inv_id for a transation in GETDATA from {} INVALID!!!".format(myself, source))
-                raise ValueError('GETDATA, MSG_TX else, this condition is not coded and shouldn\'t happen')
+                # raise ValueError('GETDATA, MSG_TX else, this condition is not coded and shouldn\'t happen')
 
         elif inv[INV_TYPE] == "MSG_BLOCK":
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is not None:
                 sim.send(BLOCK, source, myself, "BLOCK", block)
+                nodeState[myself][BLOCK_MSG][SENT] += 1
                 update_availability(myself, source, block)
             else:
-                # TODO Fix me either way this shouldn't happen it
+                # This shouldn't happen in a simulated scenario
                 logger.info(
                     "Node {} Received {} from {} with invalid block_id in GETDATA INVALID REQUEST".format(myself, msg1, source))
                 raise ValueError('GETDATA, MSG_BLOCK else, this condition is not coded and shouldn\'t happen')
 
         else:
-            # TODO Fix me either way this shouldn't happen
+            # This shouldn't happen in a simulated scenario
             logger.info("Node {} Received more invalid inv type in GETDATA from {} INVALID!!!".format(myself, source))
             raise ValueError('GETDATA, else, this condition is not coded and shouldn\'t happen')
 
@@ -193,7 +220,7 @@ def BLOCK(myself, source, msg1, block):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][BLOCK_MSG][RECEIVED] += 1
 
     if block[BLOCK_ID] in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
         nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].remove(block[BLOCK_ID])
@@ -205,42 +232,47 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][CMPCTBLOCK_MSG][RECEIVED] += 1
+
+    block = get_block(myself, cmpctblock[BLOCK_ID])
+    if block is not None:
+        logger.info("Node {} block already built ignore BLOCKTX {}".format(myself, source))
+        return
+
+    if cmpctblock[BLOCK_EXTRA_TX]:
+        for tx in cmpctblock[BLOCK_EXTRA_TX]:
+            if tx not in nodeState[myself][NODE_MEMPOOL]:
+                nodeState[myself][NODE_MEMPOOL].append(tx)
+
 
     # Check if we have all tx
     tx_to_request = []
-    tx_in_block = []
-    missing_tx = False
-    for mini_tx in cmpctblock[BLOCK_TX]:
-        tx = get_transaction(myself, mini_tx)
-        if tx is None and mini_tx not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
-            tx_to_request.append(mini_tx)
-            nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(mini_tx)
-            missing_tx = True
-        elif tx is None:
-            missing_tx = True
-            continue
+    i = 0
+    while i < len(cmpctblock[BLOCK_TX]):
+        tx = get_transaction(myself, cmpctblock[BLOCK_TX][i])
+        if tx is None:
+            tx_to_request.append(cmpctblock[BLOCK_TX][i])
         else:
-            tx_in_block.append(tx)
+            cmpctblock[BLOCK_TX][i] = tx
+        i += 1
 
     if tx_to_request:
         sim.send(GETBLOCKTXN, source, myself, "GETBLOCKTXN", (cmpctblock[BLOCK_ID], tx_to_request))
+        nodeState[myself][GETBLOCKTXN_MSG][SENT] += 1
+
         if cmpctblock not in nodeState[myself][NODE_PARTIAL_BLOCKS]:
-            nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock)
+            # TODO This could be optimized to use tx that we receive from other cmpct blocks
+            nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
         return
 
-    if not missing_tx:
-        block = (cmpctblock[BLOCK_ID], cmpctblock[BLOCK_PARENT_ID], cmpctblock[BLOCK_HEIGHT], cmpctblock[BLOCK_TIMESTAMP],
-             cmpctblock[BLOCK_GEN_NODE], tx_in_block)
-
-        process_block(myself, source, block)
+    process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX])
 
 
 def GETBLOCKTXN(myself, source, msg1, tx_request):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][GETBLOCKTXN_MSG][RECEIVED] += 1
 
     block = get_block(myself, tx_request[0])
     tx_to_send = []
@@ -254,13 +286,14 @@ def GETBLOCKTXN(myself, source, msg1, tx_request):
 
     if tx_to_send:
         sim.send(BLOCKTXN, source, myself, "BLOCKTXN", (tx_request[0], tx_to_send))
+        nodeState[myself][BLOCKTXN_MSG][SENT] += 1
 
 
 def BLOCKTXN(myself, source, msg1, tx_requested):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][BLOCKTXN_MSG][RECEIVED] += 1
 
     block = get_block(myself, tx_requested[0])
     if block is not None:
@@ -268,22 +301,17 @@ def BLOCKTXN(myself, source, msg1, tx_requested):
         return
 
     for tx in tx_requested[1]:
-        if tx not in nodeState[myself][NODE_MEMPOOL]:
-            nodeState[myself][NODE_MEMPOOL].append(tx)
-            if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
-                nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
-        else:
-            logger.info("Node {} Received tx in BLOCKTXN that already had from {} INVALID!!!".format(myself, source))
-            # raise ValueError('BLOCKTXN, else, this condition is not coded, already known tx')
+        if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
-    process_block(myself, source, build_cmpctblock(myself, tx_requested[0]))
+    process_block(myself, source, build_cmpctblock(myself, tx_requested))
 
 
 def TX(myself, source, msg1, tx):
     global nodeState
 
     logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][MSGS_RECEIVED] += 1
+    nodeState[myself][TX_MSG][RECEIVED] += 1
 
     if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
         nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
@@ -291,7 +319,7 @@ def TX(myself, source, msg1, tx):
     check_tx = get_transaction(myself, tx[TX_ID])
     if check_tx is None:
         nodeState[myself][NODE_MEMPOOL].append(tx)
-        nodeState[myself][NODE_vINV_TX_TO_SEND].append(tx)
+        nodeState[myself][NODE_vINV_TX_TO_SEND].append(("MSG_TX", tx[TX_ID]))
 
 
 def generate_new_block(myself):
@@ -323,16 +351,21 @@ def get_block(myself, block_id):
 
 
 def process_block(myself, source, block):
-    # TODO check if cmpct block is broadcast only when it's higher
     # Check if it's a new block
     if block not in nodeState[myself][NODE_RECEIVED_BLOCKS]:
+        nodeState[myself][LAST_TIME] = 0
         update_block(myself, block)
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
                 block[BLOCK_PARENT_ID] == nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_ID]:
             nodeState[myself][NODE_CURRENT_BLOCK] = block
         elif block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
-            # TODO implement re-branch
             nodeState[myself][NODE_CURRENT_BLOCK] = block
+            #parent_block = get_block(myself, block[BLOCK_PARENT_ID])
+            #if parent_block is not None:
+            #    nodeState[myself][NODE_CURRENT_BLOCK] = block
+            #else:
+                # TODO implement re-branch
+            #    raise ValueError('process_block, else, re-branch else condition')
 
         # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
         for tx in block[BLOCK_TX]:
@@ -343,6 +376,8 @@ def process_block(myself, source, block):
                     if tx[TX_ID] == tx_to_rm[INV_CONTENT_ID]:
                         nodeState[myself][NODE_vINV_TX_TO_SEND].remove(tx_to_rm)
                         break
+            if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+                nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
 
         # Update or create block availability for neighbourhood
         update_availability(myself, source, block)
@@ -353,15 +388,16 @@ def process_block(myself, source, block):
                 continue
             elif check_availability(myself, target, block[BLOCK_PARENT_ID]):
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(block))
+                nodeState[myself][CMPCTBLOCK_MSG][SENT] += 1
                 nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(block)
             else:
                 sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block)])
-            nodeState[myself][MSGS_SENT] += 1
+                nodeState[myself][HEADERS_MSG][SENT] += 1
 
     else:
-        # TODO Fix me either way this shouldn't happen IMPORTANT
+        # This shouldn't happen in a simulated scenario if it happens it also shouldn't affect the results
         logger.info("Node {} Received an unrequested full block from {} INVALID!!!".format(myself, source))
-        #raise ValueError('BLOCK, else, this condition is not coded and shouldn\'t happen')
+        # raise ValueError('BLOCK, else, this condition is not coded and shouldn\'t happen')
 
 
 def update_block(myself, block):
@@ -385,10 +421,9 @@ def update_block(myself, block):
 def cmpctblock(block):
     cmpct_tx = []
     for tx in block[BLOCK_TX]:
-        if tx is None:
-            print("pog")
         cmpct_tx.append(tx[TX_ID])
-    return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx
+    return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx,\
+            get_extra_tx_to_send(block[BLOCK_TX])
 
 
 def get_cmpctblock(myself, block_id):
@@ -399,22 +434,33 @@ def get_cmpctblock(myself, block_id):
     return None
 
 
-def build_cmpctblock(myself, block_id):
-    cmpctblock = get_cmpctblock(myself, block_id)
+def build_cmpctblock(myself, block_and_tx):
+    cmpctblock = get_cmpctblock(myself, block_and_tx[0])
 
     if cmpctblock is None:
-        raise ValueError('build_cmpctblock,  if cmpctblock is None, this condition is not coded, cmpctblock_id not in partialblocks')
+        raise ValueError('build_cmpctblock,  if cmpctblock is None, this condition is not coded, '
+                         'cmpctblock_id not in partialblocks')
 
-    tx_in_block = []
-    for tx_id in cmpctblock[BLOCK_TX]:
-        tx = get_transaction(myself, tx_id)
-        if tx is not None:
-            tx_in_block.append(tx)
+    i = 0
+    while i < len(cmpctblock[BLOCK_TX]):
+        if isinstance(cmpctblock[BLOCK_TX][i], int):
+            for tx_in_block in block_and_tx[1]:
+                if cmpctblock[BLOCK_TX][i] == tx_in_block[TX_ID]:
+                    cmpctblock[BLOCK_TX][i] = tx_in_block
+                    block_and_tx[1].remove(tx_in_block)
+                    break
+        if len(cmpctblock[BLOCK_TX][i]) == 3:
+            i += 1
+            continue
         else:
             raise ValueError('build_cmpctblock, else, this condition is not coded, tx in block but not in mempool')
+        i += 1
 
-    return cmpctblock[BLOCK_ID], cmpctblock[BLOCK_PARENT_ID], cmpctblock[BLOCK_HEIGHT], cmpctblock[BLOCK_TIMESTAMP], \
-           cmpctblock[BLOCK_GEN_NODE], tx_in_block
+    return cmpctblock
+
+
+def get_extra_tx_to_send(tx_array):
+    return []
 
 
 def get_block_header(block):
@@ -453,7 +499,7 @@ def generate_new_tx(myself):
 
     new_tx = (tx_id, "This transaction spends " + str(random.randint(0, 100)) + " Bitcoins", myself)
     nodeState[myself][NODE_MEMPOOL].append(new_tx)
-    nodeState[myself][NODE_vINV_TX_TO_SEND].append(("MSG_TX", new_tx))
+    nodeState[myself][NODE_vINV_TX_TO_SEND].append(("MSG_TX", new_tx[TX_ID]))
     tx_id += 1
 
 
@@ -470,6 +516,41 @@ def get_tx_in_block(block, tx_id):
             return tx
     return None
 
+def get_nb_of_tx_to_gen(size, cycle):
+    global current_cycle, tx_gened_0, tx_gened_1
+
+    n = number_of_to_gen_per_cycle/size
+
+    if n != 0:
+        update_tx_counters(cycle)
+        return n
+    else:
+        if tx_gened_0 < number_of_to_gen_per_cycle:
+            if random.random() < 0.5:
+                update_tx_counters(cycle)
+                return 1
+        return 0
+
+
+def update_tx_counters(cycle):
+    global current_cycle, tx_gened_0, tx_gened_1
+
+    if cycle == current_cycle:
+        tx_gened_0 += 1
+    elif cycle == current_cycle + 1:
+        tx_gened_1 += 1
+
+    if tx_gened_0 >= number_of_to_gen_per_cycle:
+        tx_gened_0 = tx_gened_1
+        tx_gened_1 = 0
+        cycle += 1
+
+    if tx_gened_1 >= number_of_to_gen_per_cycle:
+        tx_gened_0 = 0
+        tx_gened_1 = 0
+        cycle += 2
+
+
 
 def process_new_headers(myself, source, headers):
     for header in headers:
@@ -478,7 +559,9 @@ def process_new_headers(myself, source, headers):
         if parent_header_in is None and header[HEADER_PARENT_ID] != -1:
             # TODO Fix me
             logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!".format(myself, header[HEADER_PARENT_ID]))
-            raise ValueError('process_new_headers, if parent_header_in is None, this condition is not coded')
+            headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
+            sim.send(GETHEADERS, source, myself, "GETHEADERS", headers_to_request)
+            nodeState[myself][GETHEADERS_MSG][SENT] += 1
         elif parent_header_in is not None and not check_availability(myself, source, parent_header_in[BLOCK_ID]):
             update_availability(myself, source, parent_header_in)
 
@@ -496,14 +579,13 @@ def get_data_to_request(myself, source):
             continue
         elif len(block) == 4 and check_availability(myself, source, block[BLOCK_ID]) and \
                 block[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
-            #TODO IMPORTANT add list of requests already made
             data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
             nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].append(block[BLOCK_ID])
 
         elif len(block) == 4:
             continue
         else:
-            # TODO this shouldn't happen
+            # This condition shouldn't happen in a simulated scenario
             raise ValueError("get_data_to_request, else, this condition is not coded and shouldn't happen")
 
     return data_to_request
@@ -514,39 +596,45 @@ def wrapup():
     logger.info("Wrapping up")
     #logger.info(nodeState)
 
-    receivedMessages = map(lambda x: nodeState[x][MSGS_RECEIVED], nodeState)
-    sentMessages = map(lambda x: nodeState[x][MSGS_SENT], nodeState)
+    inv_messages = map(lambda x: nodeState[x][INV_MSG], nodeState)
+    getheaders_messages = map(lambda x: nodeState[x][GETHEADERS_MSG], nodeState)
+    headers_messages = map(lambda x: nodeState[x][HEADERS_MSG], nodeState)
+    getdata_messages = map(lambda x: nodeState[x][GETDATA_MSG], nodeState)
+    block_messages = map(lambda x: nodeState[x][BLOCK_MSG], nodeState)
+    cmpctblock_messages = map(lambda x: nodeState[x][CMPCTBLOCK_MSG], nodeState)
+    getblocktx_messages = map(lambda x: nodeState[x][GETBLOCKTXN_MSG], nodeState)
+    blocktx_messages = map(lambda x: nodeState[x][BLOCKTXN_MSG], nodeState)
+    tx_messages = map(lambda x: nodeState[x][TX_MSG], nodeState)
+
+
     sum_received_blocks = map(lambda x: nodeState[x][NODE_RECEIVED_BLOCKS], nodeState)
     receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
                                                   sum_received_blocks[x][y][2], sum_received_blocks[x][y][3]) ,
                                        xrange(len(sum_received_blocks[x]))), nodeState)
     sum_received_blocks = map(lambda x: map(lambda y: sum_received_blocks[x][y][0], xrange(len(sum_received_blocks[x]))), nodeState)
 
-    # gather some stats, see utils for more functions
-    logger.info("receivedMessages {}".format(receivedMessages))
-    logger.info("receivedMessages min: {}, max: {}, total: {}".format(min(receivedMessages), max(receivedMessages),
-                                                                      sum(receivedMessages)))
-    logger.info("sentMessages {}".format(sentMessages))
-    logger.info(
-        "sentMessages min: {}, max: {}, total: {}".format(min(sentMessages), max(sentMessages), sum(receivedMessages)))
-
     # dump data into gnuplot format
-    utils.dumpAsGnuplot([receivedMessages, sentMessages, sum_received_blocks, receivedBlocks],
+    utils.dumpAsGnuplot([inv_messages, getheaders_messages, headers_messages, getdata_messages, block_messages,
+                         cmpctblock_messages, getblocktx_messages, blocktx_messages, tx_messages, sum_received_blocks,
+                         receivedBlocks],
                         dumpPath + '/messages-' + str(runId) + '.gpData',
-                        ['receivedMessages sentMessages sum_received_blocks receivedBlocks'])
+                        ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
+                         '           sum_received_blocks                    receivedBlocks'])
 
     # dump data for later processing
-    with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
-        cPickle.dump(receivedMessages, f)
-        cPickle.dump(sentMessages, f)
+ #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
+  #      cPickle.dump(receivedMessages, f)
+   #     cPickle.dump(sentMessages, f)
 
 
 def createNode(neighbourhood):
-    return [0, 0, 0, None, neighbourhood, [], [], {}, [], [], [], [], []]
+    return [0, [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], None, neighbourhood,
+            [], [], {}, [], [], [], [], 0]
 
 
 def configure(config):
-    global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id, prob_generating_trans
+    global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id,\
+        number_of_to_gen_per_cycle, current_cycle, tx_gened_0, tx_gened_1
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -561,11 +649,13 @@ def configure(config):
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
     prob_generating_block = config['PROB_GEN_BLOCK']
     max_block_number = int(config['MAX_NUMBER_OF_BLOCKS'])
-    prob_generating_trans = config['PROB_GEN_TRANS']
+    number_of_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
     nodeDrift = int(nodeCycle * float(config['NODE_DRIFT']))
 
     latencyTablePath = config['LATENCY_TABLE']
     latencyValue = None
+
+    current_cycle, tx_gened_0, tx_gened_1 = 0, 0, 0
     try:
         with open(latencyTablePath, 'r') as f:
             latencyTable = cPickle.load(f)

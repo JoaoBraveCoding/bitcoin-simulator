@@ -1,5 +1,5 @@
 # system settings, mandatory
-nbNodes : 50
+nbNodes : 20
 # number of simulation cycles
 nbCycles : 20
 # duration of node cycle
@@ -27,6 +27,10 @@ MAX_NUMBER_OF_BLOCKS: 0
 #MESSASE_LOSS: 0.0
 
 #application specific settings
-PROB_GEN_BLOCK: 0.01
+# prob of a block appearing in the next x minutes -> 1 - e^-(x/10)
+# probability of finding exactly k blocks in T minutes is P(K, T) = (T/10)^K * E^(-T/10) / K!
+PROB_GEN_BLOCK: 0.1
 
-PROB_GEN_TRANS: 1
+#AVG of 250000 tx being generated atm
+# 250000/(24*6) ~=1,736
+NUMB_TX_PER_CYCLE: 1736
