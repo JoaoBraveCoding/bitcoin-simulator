@@ -24,9 +24,8 @@ HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
 
 CURRENT_CYCLE, INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, \
 TX_MSG, NODE_CURRENT_BLOCK, NODE_NEIGHBOURHOOD, NODE_RECEIVED_BLOCKS, NODE_PARTIAL_BLOCKS, NODE_BLOCKS_AVAILABILITY, \
-NODE_MEMPOOL, NODE_vINV_TX_TO_SEND, NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
-
+NODE_MEMPOOL, NODE_vINV_TX_TO_SEND, NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
 
 SENT, RECEIVED = 0, 1
 
@@ -53,28 +52,20 @@ def CYCLE(myself):
     if myself == 0:
         logger.info('node {} cycle {}'.format(myself, nodeState[myself][CURRENT_CYCLE]))
 
-    n = get_nb_of_tx_to_gen(len(nodeState), nodeState[myself][CURRENT_CYCLE])
-    nodeState[myself][CURRENT_CYCLE] += 1
-
-    # schedule next execution
-    if nodeState[myself][CURRENT_CYCLE] < nbCycles:
-        sim.schedulleExecution(CYCLE, myself)
 
     # If a node can generate transactions
     i = 0
+    n = get_nb_of_tx_to_gen(len(nodeState), nodeState[myself][CURRENT_CYCLE])
     while i < n:
         generate_new_tx(myself)
         i = i + 1
 
     # If the node can generate a block
-    Y = 1 - 10 * numpy.random.exponential(10)
-    while Y < 0:
-        Y = 1 - 10 * numpy.random.exponential(10)
+    if nodeState[myself][NODE_TIME_TO_GEN] == -1:
+        next_t_to_gen(myself)
 
-    # (1-math.exp(-nodeState[myself][LAST_TIME]/10))
-    # Y > 0.9
-    # random.random() < prob_generating_block
-    if Y > 0.9 and (max_block_number == 0 or block_id < max_block_number):
+    if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE] and (max_block_number == 0 or block_id < max_block_number):
+        next_t_to_gen(myself)
         new_block = generate_new_block(myself)
 
         # Check if can send as cmpct or send through inv
@@ -97,6 +88,12 @@ def CYCLE(myself):
             nodeState[myself][INV_MSG][SENT] += 1
 
         nodeState[myself][NODE_vINV_TX_TO_SEND] = []
+
+    nodeState[myself][CURRENT_CYCLE] += 1
+
+    # schedule next execution
+    if nodeState[myself][CURRENT_CYCLE] < nbCycles:
+        sim.schedulleExecution(CYCLE, myself)
 
 
 def INV(myself, source, msg1, vInv):
@@ -318,6 +315,16 @@ def TX(myself, source, msg1, tx):
         nodeState[myself][NODE_vINV_TX_TO_SEND].append(("MSG_TX", tx[TX_ID]))
 
 
+def next_t_to_gen(myself):
+    y = numpy.random.random()
+    x = - 10 * numpy.log(1-y)
+
+    for tuple in values:
+        if tuple[0] <= x < tuple[1]:
+            nodeState[myself][NODE_TIME_TO_GEN] += tuple[2]*2
+            return
+
+
 def generate_new_block(myself):
     global nodeState, block_id
 
@@ -353,8 +360,10 @@ def process_block(myself, source, block):
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
                 block[BLOCK_PARENT_ID] == nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_ID]:
             nodeState[myself][NODE_CURRENT_BLOCK] = block
+            next_t_to_gen(myself)
         elif block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
             nodeState[myself][NODE_CURRENT_BLOCK] = block
+            next_t_to_gen(myself)
             # TODO implement re-branch
 
         # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
@@ -560,12 +569,11 @@ def process_new_headers(myself, source, headers):
         header_in = get_block(myself, header[HEADER_ID])
         parent_header_in = get_block(myself, header[HEADER_PARENT_ID])
         if parent_header_in is None and header[HEADER_PARENT_ID] != -1:
-            # TODO Fix me
             logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!".format(myself, header[HEADER_PARENT_ID]))
             headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
             sim.send(GETHEADERS, source, myself, "GETHEADERS", headers_to_request)
             nodeState[myself][GETHEADERS_MSG][SENT] += 1
-            return
+            continue
         elif parent_header_in is not None and not check_availability(myself, source, parent_header_in[BLOCK_ID]):
             update_availability(myself, source, parent_header_in)
 
@@ -630,12 +638,12 @@ def wrapup():
 
 def createNode(neighbourhood):
     return [0, [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], None, neighbourhood,
-            [], [], {}, [], [], [], []]
+            [], [], {}, [], [], [], [], -1]
 
 
 def configure(config):
     global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id,\
-        number_of_to_gen_per_cycle, current_cycle, tx_gened_0, tx_gened_1, max_block_size, min_tx_size, max_tx_size
+        number_of_to_gen_per_cycle, current_cycle, tx_gened_0, tx_gened_1, max_block_size, min_tx_size, max_tx_size, values
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -662,6 +670,11 @@ def configure(config):
     latencyValue = None
 
     current_cycle, tx_gened_0, tx_gened_1 = 0, 0, 0
+
+    values = []
+    for i in range(0, 20):
+        values.append((i, i+1, 20-i))
+
     try:
         with open(latencyTablePath, 'r') as f:
             latencyTable = cPickle.load(f)

@@ -1,7 +1,7 @@
 # system settings, mandatory
-nbNodes : 50
+nbNodes : 500
 # number of simulation cycles
-nbCycles : 11
+nbCycles : 10
 # duration of node cycle
 NODE_CYCLE: 125
 # node cycle drift, zero means perfect clocks 
@@ -33,7 +33,8 @@ PROB_GEN_BLOCK: 0.1
 
 #AVG of 250000 tx being generated atm
 # 250000/(24*6) ~=1,736
-NUMB_TX_PER_CYCLE: 1736
+# 250000/(24*12) ~= 868
+NUMB_TX_PER_CYCLE: 868
 
 MIN_TX_SIZE: 401
 MAX_TX_SIZE: 1498
