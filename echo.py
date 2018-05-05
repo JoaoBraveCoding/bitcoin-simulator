@@ -82,12 +82,13 @@ def CYCLE(myself):
                 nodeState[myself][INV_MSG][SENT] += 1
 
     # Send new transactions either created or received
-    if nodeState[myself][NODE_vINV_TX_TO_SEND]:
-        for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            sim.send(INV, target, myself, "INV", nodeState[myself][NODE_vINV_TX_TO_SEND])
-            nodeState[myself][INV_MSG][SENT] += 1
+    if nodeState[myself][CURRENT_CYCLE] % 2 == 0:
+        if nodeState[myself][NODE_vINV_TX_TO_SEND]:
+            for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
+                sim.send(INV, target, myself, "INV", nodeState[myself][NODE_vINV_TX_TO_SEND])
+                nodeState[myself][INV_MSG][SENT] += 1
 
-        nodeState[myself][NODE_vINV_TX_TO_SEND] = []
+            nodeState[myself][NODE_vINV_TX_TO_SEND] = []
 
     nodeState[myself][CURRENT_CYCLE] += 1
 

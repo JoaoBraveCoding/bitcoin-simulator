@@ -1,7 +1,7 @@
 # system settings, mandatory
 nbNodes : 500
 # number of simulation cycles
-nbCycles : 10
+nbCycles : 20
 # duration of node cycle
 NODE_CYCLE: 125
 # node cycle drift, zero means perfect clocks 
