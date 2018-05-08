@@ -654,7 +654,11 @@ def configure(config):
     if MESSAGE_LOSS > 0:
         sim.setMessageLoss(MESSAGE_LOSS)
 
-    nbNodes = config['nbNodes']
+    if console_nb_of_nodes == 0:
+        nbNodes = config['nbNodes']
+    else:
+        nbNodes = console_nb_of_nodes
+
     nbCycles = config['nbCycles']
     nodeCycle = int(config['NODE_CYCLE'])
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
@@ -728,6 +732,9 @@ if __name__ == '__main__':
     confFile = dumpPath + '/conf.yaml'
     runId = int(sys.argv[2])
     f = open(confFile)
+    console_nb_of_nodes = 0
+    if len(sys.argv) == 4:
+        console_nb_of_nodes = int(sys.argv[3])
 
     # load configuration file
     configure(yaml.load(f))
