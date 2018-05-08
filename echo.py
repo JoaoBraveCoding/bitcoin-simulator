@@ -322,7 +322,7 @@ def next_t_to_gen(myself):
 
     for tuple in values:
         if tuple[0] <= x < tuple[1]:
-            nodeState[myself][NODE_TIME_TO_GEN] += tuple[2]*2
+            nodeState[myself][NODE_TIME_TO_GEN] += tuple[2]
             return
 
 
@@ -624,14 +624,15 @@ def wrapup():
     sum_received_blocks = map(lambda x: map(lambda y: sum_received_blocks[x][y][0], xrange(len(sum_received_blocks[x]))), nodeState)
 
     # dump data into gnuplot format
-    utils.dumpAsGnuplot([inv_messages, getheaders_messages, headers_messages, getdata_messages, block_messages,
+    utils.dump_as_gnu_plot([inv_messages, getheaders_messages, headers_messages, getdata_messages, block_messages,
                          cmpctblock_messages, getblocktx_messages, blocktx_messages, tx_messages, sum_received_blocks,
                          receivedBlocks],
                         dumpPath + '/messages-' + str(runId) + '.gpData',
                         ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
                          '           sum_received_blocks                    receivedBlocks'])
 
-    # dump data for later processing
+    utils.compute_average_of_message("getblocktx", getblocktx_messages, dumpPath)
+
  #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
   #      cPickle.dump(receivedMessages, f)
    #     cPickle.dump(sentMessages, f)
@@ -673,8 +674,12 @@ def configure(config):
     current_cycle, tx_gened_0, tx_gened_1 = 0, 0, 0
 
     values = []
-    for i in range(0, 20):
-        values.append((i, i+1, 20-i))
+    i = 0
+    j = 10
+    while i < 20:
+        values.append((i, i + 2, j))
+        i += 2
+        j -= 1
 
     try:
         with open(latencyTablePath, 'r') as f:
@@ -684,7 +689,7 @@ def configure(config):
         latencyValue = int(latencyTablePath)
         logger.warn('Using constant latency value: {}'.format(latencyValue))
 
-    latencyTable = utils.checkLatencyNodes(latencyTable, nbNodes, latencyValue)
+    latencyTable = utils.check_latency_nodes(latencyTable, nbNodes, latencyValue)
     latencyDrift = eval(config['LATENCY_DRIFT'])
 
     block_id = 0

@@ -54,27 +54,35 @@ def pad_lists_to_same_size(data, defaultElement=0):
     return map(lambda x: [defaultElement for n in range(maxSize - len(x))] + x, data)
 
 
+def compute_average_of_message(variable_name, variable, dumpPath):
+    # dump data for later processing
+    with open(dumpPath + '/'+ variable_name +'-avg.txt', 'a') as f:
+        list = map(lambda x: variable[x][0], range(0, len(variable)))
+        avg_sent = compute_average(list)
+        list = map(lambda x: variable[x][1], range(0, len(variable)))
+        avg_received = compute_average(list)
+        print >> f, len(variable), avg_sent, avg_received
+
+
 def compute_average(data):
     """
-    Computes the average of a sequence of lists.
+    Computes the average of a list.
     """
-
     items = len(data)
 
     if items > 1:
-        # print 'Averaging...'
-
-        data = pad_lists_to_same_size(data)
-
-        dataAverage = map(lambda x, y: x + y, data[0], data[1])
+        print('Averaging...')
+        dataAverage = data[0] + data[1]
 
         for i in range(2, items):
-            dataAverage = map(lambda x, y: x + y, dataAverage, data[i])
+            dataAverage += data[i]
 
-        dataAverage = map(lambda x: x / (items + 0.), dataAverage)
-    else:
-        print 'Single Run.'
+        dataAverage = dataAverage/items
+    elif items == 1:
+        print('Single Run.')
         dataAverage = data[0]
+    else:
+        dataAverage = 0
 
     return dataAverage
 
