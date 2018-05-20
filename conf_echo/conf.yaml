@@ -1,9 +1,11 @@
 # system settings, mandatory
 nbNodes : 50
 # number of simulation cycles
-nbCycles : 60
+# 10080 = 1 week with 1block ~= 10 cycles
+# 720 = 12h with 1block ~= 10 cycles
+nbCycles : 10
 # duration of node cycle
-NODE_CYCLE: 125
+NODE_CYCLE: 12500
 # node cycle drift, zero means perfect clocks 
 NODE_DRIFT: 0
 # link latency, 
@@ -34,7 +36,8 @@ PROB_GEN_BLOCK: 0.1
 #AVG of 250000 tx being generated atm
 # 250000/(24*6) ~=1,736
 # 250000/(24*12) ~= 868
-NUMB_TX_PER_CYCLE: 868
+# 250000/(24*6*10) ~= 174
+NUMB_TX_PER_CYCLE: 174
 
 MIN_TX_SIZE: 401
 MAX_TX_SIZE: 1498
