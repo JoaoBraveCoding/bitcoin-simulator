@@ -69,14 +69,14 @@ def CYCLE(myself):
 
         # Check if can send as cmpct or send through inv
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if nodeState[myself][NODE_CURRENT_BLOCK] is not None and \
-                    check_availability(myself, target, nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_PARENT_ID]):
+            if check_availability(myself, target, new_block[BLOCK_PARENT_ID]):
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(new_block))
                 nodeState[myself][CMPCTBLOCK_MSG][SENT] += 1
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(new_block)
+                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(new_block[BLOCK_ID])
 
             else:
                 vInv = [("MSG_BLOCK", new_block[BLOCK_ID])]
+                # TODO change this send header and inv of possible parents
                 sim.send(INV, target, myself, "INV", vInv)
                 nodeState[myself][INV_MSG][SENT] += 1
 
@@ -116,9 +116,9 @@ def INV(myself, source, msg1, vInv):
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is None:
                 headers_to_request.append(inv[INV_CONTENT_ID])
-                update_availability(myself, source, (inv[INV_CONTENT_ID],))
+                update_availability(myself, source, inv[INV_CONTENT_ID])
             else:
-                update_availability(myself, source, block)
+                update_availability(myself, source, block[BLOCK_ID])
         else:
             # logger.info("Node {} Received INV from {} with invalid inv type {}".format(myself, source, inv))
             raise ValueError('INV, else, node received invalid inv type. This condition is not coded')
@@ -194,7 +194,7 @@ def GETDATA(myself, source, msg1, requesting_data):
             if block is not None:
                 sim.send(BLOCK, source, myself, "BLOCK", block)
                 nodeState[myself][BLOCK_MSG][SENT] += 1
-                update_availability(myself, source, block)
+                update_availability(myself, source, block[BLOCK_ID])
             else:
                 # This shouldn't happen in a simulated scenario
                 # logger.info(
@@ -216,7 +216,8 @@ def BLOCK(myself, source, msg1, block):
     if block[BLOCK_ID] in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
         nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].remove(block[BLOCK_ID])
 
-    process_block(myself, source, block)
+
+    process_block(myself, source, block, "BLOCK")
 
 
 def CMPCTBLOCK(myself, source, msg1, cmpctblock):
@@ -257,7 +258,7 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
             nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
         return
 
-    process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX])
+    process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX], "CMPCTBLOCK")
 
 
 def GETBLOCKTXN(myself, source, msg1, tx_request):
@@ -293,10 +294,10 @@ def BLOCKTXN(myself, source, msg1, tx_requested):
         return
 
     for tx in tx_requested[1]:
-        if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
-            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
+        if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
 
-    process_block(myself, source, build_cmpctblock(myself, tx_requested))
+    process_block(myself, source, build_cmpctblock(myself, tx_requested), "CMPCTBLOCK")
 
 
 def TX(myself, source, msg1, tx):
@@ -353,11 +354,14 @@ def get_block(myself, block_id):
     return None
 
 
-def process_block(myself, source, block):
+def process_block(myself, source, block, type):
     global nodeState
 
     # Check if it's a new block
     if block not in nodeState[myself][NODE_RECEIVED_BLOCKS]:
+        if myself == 0:
+            write_to_log("blocksReceived", str(time.time()) + " " + str(block[BLOCK_ID]) + " " + str(block[BLOCK_TIMESTAMP])
+                     + " " + type)
         update_block(myself, block)
         nodeState[myself][NODE_CURRENT_BLOCK] = block
         next_t_to_gen(myself)
@@ -367,12 +371,12 @@ def process_block(myself, source, block):
         # Broadcast new block
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
             if target == source or check_availability(myself, target, block[BLOCK_ID]):
-                update_availability(myself, source, block)
+                update_availability(myself, source, block[BLOCK_ID])
                 continue
             elif check_availability(myself, target, block[BLOCK_PARENT_ID]):
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(block))
                 nodeState[myself][CMPCTBLOCK_MSG][SENT] += 1
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(block)
+                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(block[BLOCK_ID])
             else:
                 sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block)])
                 nodeState[myself][HEADERS_MSG][SENT] += 1
@@ -389,10 +393,9 @@ def update_tx(myself, block):
         if tx in nodeState[myself][NODE_MEMPOOL]:
             nodeState[myself][NODE_MEMPOOL].remove(tx)
 
-            for tx_to_rm in nodeState[myself][NODE_vINV_TX_TO_SEND]:
-                if tx[TX_ID] == tx_to_rm[INV_CONTENT_ID]:
-                    nodeState[myself][NODE_vINV_TX_TO_SEND].remove(tx_to_rm)
-                    break
+            if ("MSG_TX", tx[TX_ID]) in nodeState[myself][NODE_vINV_TX_TO_SEND]:
+                nodeState[myself][NODE_vINV_TX_TO_SEND].remove(("MSG_TX", tx[TX_ID]))
+
         if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
 
@@ -443,6 +446,9 @@ def build_cmpctblock(myself, block_and_tx):
         if isinstance(cmpctblock[BLOCK_TX][i], int):
             for tx_in_block in block_and_tx[1]:
                 if cmpctblock[BLOCK_TX][i] == tx_in_block[TX_ID]:
+                    if myself == 0:
+                        write_to_log("missingTxs", str(time.time()) + " " + str(cmpctblock[BLOCK_ID]) + " "
+                                     + str(tx_in_block[TX_ID]) + " " + str(i) + "/" + str(len(cmpctblock[BLOCK_TX])))
                     cmpctblock[BLOCK_TX][i] = tx_in_block
                     block_and_tx[1].remove(tx_in_block)
                     break
@@ -469,24 +475,15 @@ def update_availability(myself, source, block):
     if source not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
         nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
         return
-
-    i = len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][source]) - 1
-    while i >= 0:
-        if nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i][0] == block[0] and \
-                len(nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i]) > len(block):
-            nodeState[myself][NODE_BLOCKS_AVAILABILITY][source][i] = block
-            return
-        i = i - 1
-
-    nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
+    else:
+        nodeState[myself][NODE_BLOCKS_AVAILABILITY][source].append(block)
 
 
 def check_availability(myself, target, block_id):
     if target not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
         return False
-    for tpl in reversed(nodeState[myself][NODE_BLOCKS_AVAILABILITY][target]):
-        if tpl[0] == block_id:
-            return True
+    if block_id in nodeState[myself][NODE_BLOCKS_AVAILABILITY][target]:
+        return True
     return False
 
 
@@ -554,13 +551,13 @@ def process_new_headers(myself, source, headers):
             nodeState[myself][GETHEADERS_MSG][SENT] += 1
             continue
         elif parent_header_in is not None and not check_availability(myself, source, parent_header_in[BLOCK_ID]):
-            update_availability(myself, source, parent_header_in)
+            update_availability(myself, source, parent_header_in[BLOCK_ID])
 
         if header_in is None:
             nodeState[myself][NODE_RECEIVED_BLOCKS].append(header)
-            update_availability(myself, source, header)
+            update_availability(myself, source, header[HEADER_ID])
         elif not check_availability(myself, source, header_in[BLOCK_ID]):
-            update_availability(myself, source, header_in)
+            update_availability(myself, source, header_in[BLOCK_ID])
 
 
 def get_data_to_request(myself, source):
@@ -578,6 +575,12 @@ def get_data_to_request(myself, source):
                              "expected size. This condition is not coded and shouldn't happen {}".format(block))
 
     return data_to_request
+
+
+def write_to_log(file, line):
+    f = open("logs/" + file + ".txt", "a+")
+    f.write(line + "\n")
+    f.close()
 
 
 def wrapup():
@@ -652,6 +655,12 @@ def configure(config):
 
     latencyTablePath = config['LATENCY_TABLE']
     latencyValue = None
+
+    f = open("logs/blocksReceived.txt", "w")
+    f.close()
+    f = open("logs/missingTxs.txt", "w")
+    f.close()
+
 
     tx_gened = [0] * nbCycles
 
