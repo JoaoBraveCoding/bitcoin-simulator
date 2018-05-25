@@ -22,10 +22,16 @@ TX_ID, TX_CONTENT, TX_GEN_NODE, TX_SIZE = 0, 1, 2, 3
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
 
-CURRENT_CYCLE, INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, \
-TX_MSG, NODE_CURRENT_BLOCK, NODE_NEIGHBOURHOOD, NODE_RECEIVED_BLOCKS, NODE_PARTIAL_BLOCKS, NODE_BLOCKS_AVAILABILITY, \
-NODE_MEMPOOL, NODE_vINV_TX_TO_SEND, NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_RECEIVED_BLOCKS, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, \
+    NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, MSGS \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+
+NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
+
+NEIGHBOURHOOD_KNOWN_BLOCKS, NEIGHBOURHOOD_KNOWN_TX, NEIGHBOURHOOD_TX_TO_SEND = 0, 1, 2
+
+INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8
 
 SENT, RECEIVED = 0, 1
 
@@ -63,33 +69,28 @@ def CYCLE(myself):
     if nodeState[myself][NODE_TIME_TO_GEN] == -1:
         next_t_to_gen(myself)
 
-    if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE] and (max_block_number == 0 or block_id < max_block_number):
+    if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE] and \
+            (max_block_number == 0 or block_id < max_block_number):
         next_t_to_gen(myself)
         new_block = generate_new_block(myself)
 
         # Check if can send as cmpct or send through inv
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if check_availability(myself, target, new_block[BLOCK_PARENT_ID]):
+            if check_availability(myself, target, "block", new_block[BLOCK_PARENT_ID]):
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(new_block))
-                nodeState[myself][CMPCTBLOCK_MSG][SENT] += 1
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(new_block[BLOCK_ID])
+                nodeState[myself][MSGS][CMPCTBLOCK_MSG][SENT] += 1
+                update_neighbourhood_inv(myself, target, "block", new_block[BLOCK_ID])
 
             else:
                 vInv = [("MSG_BLOCK", new_block[BLOCK_ID])]
                 # TODO change this send header and inv of possible parents
                 sim.send(INV, target, myself, "INV", vInv)
-                nodeState[myself][INV_MSG][SENT] += 1
+                nodeState[myself][MSGS][INV_MSG][SENT] += 1
 
     # Send new transactions either created or received
-    if nodeState[myself][NODE_vINV_TX_TO_SEND]:
-        for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            sim.send(INV, target, myself, "INV", nodeState[myself][NODE_vINV_TX_TO_SEND])
-            nodeState[myself][INV_MSG][SENT] += 1
-
-        nodeState[myself][NODE_vINV_TX_TO_SEND] = []
+    broadcast_invs(myself)
 
     nodeState[myself][CURRENT_CYCLE] += 1
-
     # schedule next execution
     if nodeState[myself][CURRENT_CYCLE] < nbCycles:
         sim.schedulleExecution(CYCLE, myself)
@@ -98,45 +99,47 @@ def CYCLE(myself):
 def INV(myself, source, msg1, vInv):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][INV_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][INV_MSG][RECEIVED] += 1
 
     ask_for = []
     headers_to_request = []
     for inv in vInv:
         if inv[INV_TYPE] == "MSG_TX":
-            tx = get_transaction(myself, inv[INV_CONTENT_ID])
-            if tx is None and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+            update_neighbourhood_inv(myself, source, "tx", inv[INV_CONTENT_ID])
+            seen_tx = seen_it(myself, "tx", inv[INV_CONTENT_ID])
+            if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
-                nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
-            elif tx is None:
-                continue
+                nodeState[myself][NODE_TX_ALREADY_REQUESTED].add(inv[INV_CONTENT_ID])
 
         elif inv[INV_TYPE] == "MSG_BLOCK":
-            block = get_block(myself, inv[INV_CONTENT_ID])
-            if block is None:
+            update_neighbourhood_inv(myself, source, "block", inv[INV_CONTENT_ID])
+            seen_block = seen_it(myself, "block", inv[INV_CONTENT_ID])
+            if not seen_block:
                 headers_to_request.append(inv[INV_CONTENT_ID])
-                update_availability(myself, source, inv[INV_CONTENT_ID])
-            else:
-                update_availability(myself, source, block[BLOCK_ID])
+
         else:
             # logger.info("Node {} Received INV from {} with invalid inv type {}".format(myself, source, inv))
             raise ValueError('INV, else, node received invalid inv type. This condition is not coded')
 
     if ask_for:
         sim.send(GETDATA, source, myself, "GETDATA", ask_for)
-        nodeState[myself][GETDATA_MSG][SENT] += 1
+        nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
 
     if headers_to_request:
         sim.send(GETHEADERS, source, myself, "GETHEADERS", headers_to_request)
-        nodeState[myself][GETHEADERS_MSG][SENT] += 1
+        nodeState[myself][MSGS][GETHEADERS_MSG][SENT] += 1
 
 
 def GETHEADERS(myself, source, msg1, get_headers):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][GETHEADERS_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][GETHEADERS_MSG][RECEIVED] += 1
 
     headers_to_send = []
     for id in get_headers:
@@ -148,14 +151,16 @@ def GETHEADERS(myself, source, msg1, get_headers):
             raise ValueError('GETHEADERS, else, node received invalid headerID')
 
     sim.send(HEADERS, source, myself, "HEADERS", headers_to_send)
-    nodeState[myself][HEADERS_MSG][SENT] += 1
+    nodeState[myself][MSGS][HEADERS_MSG][SENT] += 1
 
 
 def HEADERS(myself, source, msg1, headers):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][HEADERS_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][HEADERS_MSG][RECEIVED] += 1
 
     process_new_headers(myself, source, headers)
     # TODO process_new_headers might return without doing anything check if we should also return
@@ -163,7 +168,7 @@ def HEADERS(myself, source, msg1, headers):
     if len(data_to_request) <= 16:
         # If is a new block in the main chain try and direct fetch
         sim.send(GETDATA, source, myself, "GETDATA", data_to_request)
-        nodeState[myself][GETDATA_MSG][SENT] += 1
+        nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
     else:
         # Else rely on other means of download
         # TODO Fix this case still don't know how it's done
@@ -174,48 +179,44 @@ def HEADERS(myself, source, msg1, headers):
 def GETDATA(myself, source, msg1, requesting_data):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][GETDATA_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][GETDATA_MSG][RECEIVED] += 1
 
     for inv in requesting_data:
         if inv[INV_TYPE] == "MSG_TX":
             tx = get_transaction(myself, inv[INV_CONTENT_ID])
             if tx is not None:
                 sim.send(TX, source, myself, "TX", tx)
-                nodeState[myself][TX_MSG][SENT] += 1
-            # else:
-                # This shouldn't happen in a simulated scenario
-                # logger.info(
-                #    "Node {} Received more invalid inv_id for a transation in GETDATA from {} INVALID!!!".format(myself, source))
-                # raise ValueError('GETDATA, MSG_TX else, this condition is not coded and shouldn\'t happen')
+                nodeState[myself][MSGS][TX_MSG][SENT] += 1
+                update_neighbourhood_inv(myself, source, "tx", tx[TX_ID])
 
         elif inv[INV_TYPE] == "MSG_BLOCK":
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is not None:
                 sim.send(BLOCK, source, myself, "BLOCK", block)
-                nodeState[myself][BLOCK_MSG][SENT] += 1
-                update_availability(myself, source, block[BLOCK_ID])
+                nodeState[myself][MSGS][BLOCK_MSG][SENT] += 1
+                update_neighbourhood_inv(myself, source, "block", block[BLOCK_ID])
             else:
                 # This shouldn't happen in a simulated scenario
-                # logger.info(
-                #    "Node {} Received {} from {} with invalid block_id in GETDATA INVALID REQUEST".format(myself, msg1, source))
                 raise ValueError('GETDATA, MSG_BLOCK else, this condition is not coded and shouldn\'t happen')
 
         else:
             # This shouldn't happen in a simulated scenario
-            # logger.info("Node {} Received more invalid inv type in GETDATA from {} INVALID!!!".format(myself, source))
             raise ValueError('GETDATA, else, this condition is not coded and shouldn\'t happen')
 
 
 def BLOCK(myself, source, msg1, block):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][BLOCK_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][BLOCK_MSG][RECEIVED] += 1
 
     if block[BLOCK_ID] in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
         nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].remove(block[BLOCK_ID])
-
 
     process_block(myself, source, block, "BLOCK")
 
@@ -223,12 +224,12 @@ def BLOCK(myself, source, msg1, block):
 def CMPCTBLOCK(myself, source, msg1, cmpctblock):
     global nodeState
 
-    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][CMPCTBLOCK_MSG][RECEIVED] += 1
+    new_connection(myself, source)
 
-    block = get_block(myself, cmpctblock[BLOCK_ID])
-    if block is not None:
-        # logger.info("Node {} block already built ignore BLOCKTX {}".format(myself, source))
+    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
+    nodeState[myself][MSGS][CMPCTBLOCK_MSG][RECEIVED] += 1
+
+    if seen_it(myself, "block", cmpctblock[BLOCK_ID]):
         return
 
     if cmpctblock[BLOCK_EXTRA_TX]:
@@ -251,7 +252,7 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
 
     if tx_to_request:
         sim.send(GETBLOCKTXN, source, myself, "GETBLOCKTXN", (cmpctblock[BLOCK_ID], tx_to_request))
-        nodeState[myself][GETBLOCKTXN_MSG][SENT] += 1
+        nodeState[myself][MSGS][GETBLOCKTXN_MSG][SENT] += 1
 
         if cmpctblock not in nodeState[myself][NODE_PARTIAL_BLOCKS]:
             # TODO This could be optimized to use tx that we receive from other cmpct blocks
@@ -264,8 +265,10 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
 def GETBLOCKTXN(myself, source, msg1, tx_request):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][GETBLOCKTXN_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][GETBLOCKTXN_MSG][RECEIVED] += 1
 
     block = get_block(myself, tx_request[0])
     tx_to_send = []
@@ -275,22 +278,24 @@ def GETBLOCKTXN(myself, source, msg1, tx_request):
 
     if len(tx_to_send) != len(tx_request[1]):
         # logger.info("Node {} Received invalid tx_id in GETBLOCKTXN from {} INVALID!!!".format(myself, source))
-        raise ValueError('GETBLOCKTXN, else, this condition is not coded invalid tx_id')
+        raise ValueError('GETBLOCKTXN, if, this condition is not coded invalid size req tx != size sent tx')
 
     if tx_to_send:
         sim.send(BLOCKTXN, source, myself, "BLOCKTXN", (tx_request[0], tx_to_send))
-        nodeState[myself][BLOCKTXN_MSG][SENT] += 1
+        nodeState[myself][MSGS][BLOCKTXN_MSG][SENT] += 1
+    else:
+        raise ValueError('GETBLOCKTXN, else, this condition is not coded empty tx_to_send')
 
 
 def BLOCKTXN(myself, source, msg1, tx_requested):
     global nodeState
 
-    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][BLOCKTXN_MSG][RECEIVED] += 1
+    new_connection(myself, source)
 
-    block = get_block(myself, tx_requested[0])
-    if block is not None:
-        # logger.info("Node {} block already built ignore BLOCKTX {}".format(myself, source))
+    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
+    nodeState[myself][MSGS][BLOCKTXN_MSG][RECEIVED] += 1
+
+    if seen_it(myself, "block", tx_requested[0]):
         return
 
     for tx in tx_requested[1]:
@@ -303,16 +308,19 @@ def BLOCKTXN(myself, source, msg1, tx_requested):
 def TX(myself, source, msg1, tx):
     global nodeState
 
+    new_connection(myself, source)
+
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-    nodeState[myself][TX_MSG][RECEIVED] += 1
+    nodeState[myself][MSGS][TX_MSG][RECEIVED] += 1
 
     if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
         nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
 
-    check_tx = get_transaction(myself, tx[TX_ID])
-    if check_tx is None:
+    update_neighbourhood_inv(myself, source, "tx", tx[TX_ID])
+    if not seen_it(myself, "tx", tx[TX_ID]):
+        update_seen_inv(myself, "tx", tx[TX_ID])
         nodeState[myself][NODE_MEMPOOL].append(tx)
-        nodeState[myself][NODE_vINV_TX_TO_SEND].append(("MSG_TX", tx[TX_ID]))
+        push_to_send(myself, tx[TX_ID])
 
 
 def next_t_to_gen(myself):
@@ -342,6 +350,7 @@ def generate_new_block(myself):
 
     # Store the new block
     nodeState[myself][NODE_RECEIVED_BLOCKS].append(new_block)
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].add(new_block[BLOCK_ID])
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block
     block_id += 1
     return new_block
@@ -358,32 +367,35 @@ def process_block(myself, source, block, type):
     global nodeState
 
     # Check if it's a new block
-    if block not in nodeState[myself][NODE_RECEIVED_BLOCKS]:
+    if not seen_it(myself, "block", block[BLOCK_ID]):
         if myself == 0:
             write_to_log("blocksReceived", str(time.time()) + " " + str(block[BLOCK_ID]) + " " + str(block[BLOCK_TIMESTAMP])
-                     + " " + type)
+                         + " " + type)
+        update_seen_inv(myself, "block", block[BLOCK_ID])
         update_block(myself, block)
-        nodeState[myself][NODE_CURRENT_BLOCK] = block
+        if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
+                block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
+            nodeState[myself][NODE_CURRENT_BLOCK] = block
         next_t_to_gen(myself)
+
         # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
         update_tx(myself, block)
 
         # Broadcast new block
+        update_neighbourhood_inv(myself, source, "block", block[BLOCK_ID])
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if target == source or check_availability(myself, target, block[BLOCK_ID]):
-                update_availability(myself, source, block[BLOCK_ID])
+            if target == source or check_availability(myself, target, "block", block[BLOCK_ID]):
                 continue
-            elif check_availability(myself, target, block[BLOCK_PARENT_ID]):
+            elif check_availability(myself, target, "block", block[BLOCK_PARENT_ID]):
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(block))
-                nodeState[myself][CMPCTBLOCK_MSG][SENT] += 1
-                nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(target, []).append(block[BLOCK_ID])
+                nodeState[myself][MSGS][CMPCTBLOCK_MSG][SENT] += 1
+                update_neighbourhood_inv(myself, target, "block", block[BLOCK_ID])
             else:
                 sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block)])
-                nodeState[myself][HEADERS_MSG][SENT] += 1
+                nodeState[myself][MSGS][HEADERS_MSG][SENT] += 1
 
     else:
-        # This shouldn't happen in a simulated scenario if it happens it also shouldn't affect the results
-        logger.info("Node {} Received an unrequested full block from {} INVALID!!!".format(myself, source))
+        update_neighbourhood_inv(myself, source, "block", block[BLOCK_ID])
 
 
 def update_tx(myself, block):
@@ -393,8 +405,8 @@ def update_tx(myself, block):
         if tx in nodeState[myself][NODE_MEMPOOL]:
             nodeState[myself][NODE_MEMPOOL].remove(tx)
 
-            if ("MSG_TX", tx[TX_ID]) in nodeState[myself][NODE_vINV_TX_TO_SEND]:
-                nodeState[myself][NODE_vINV_TX_TO_SEND].remove(("MSG_TX", tx[TX_ID]))
+            for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
+                update_neighbourhood_inv(myself, neighbour, "tx", tx[TX_ID])
 
         if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
@@ -469,31 +481,80 @@ def get_block_header(block):
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE]
 
 
-def update_availability(myself, source, block):
-    global nodeState
+def seen_it(myself, type, id):
+    if type != "block" and type != "tx":
+        print("check_availability strange type {}".format(type))
+        exit(-1)
 
-    if source not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
-        nodeState[myself][NODE_BLOCKS_AVAILABILITY].setdefault(source, []).append(block)
-        return
-    else:
-        nodeState[myself][NODE_BLOCKS_AVAILABILITY][source].append(block)
-
-
-def check_availability(myself, target, block_id):
-    if target not in nodeState[myself][NODE_BLOCKS_AVAILABILITY].keys():
-        return False
-    if block_id in nodeState[myself][NODE_BLOCKS_AVAILABILITY][target]:
+    if type == "block" and id in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS] or \
+        type == "tx" and id in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
         return True
     return False
+
+
+def update_seen_inv(myself, type, id):
+    if type != "block" and type != "tx":
+        print("check_availability strange type {}".format(type))
+        exit(-1)
+
+    if type == "block":
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].add(id)
+    elif type == "tx":
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].add(id)
+    else:
+        print("update_inv else condition reached with type: {} and id: {}".format(type, id))
+        exit(-1)
+
+
+# Neighbourhood update and check functions
+def update_neighbourhood_inv(myself, target, type, id):
+    if type != "block" and type != "tx":
+        print("check_availability strange type {}".format(type))
+        exit(-1)
+
+    if type == "block":
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS].add(id)
+    elif type == "tx":
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX].add(id)
+        if id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].remove(id)
+    else:
+        print("update_inv else condition reached with type: {} and id: {}".format(type, id))
+        exit(-1)
+
+
+def check_availability(myself, target, type, id):
+    if type != "block" and type != "tx":
+        print("check_availability strange type {}".format(type))
+        exit(-1)
+
+    if target not in nodeState[myself][NODE_NEIGHBOURHOOD_INV].keys():
+        return False
+    if type == "block" and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS] or \
+        type == "tx" and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]:
+        return True
+    return False
+
+
+def push_to_send(myself, id):
+    for node in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        if node not in nodeState[myself][NODE_NEIGHBOURHOOD_INV].keys():
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV].setdefault(node, [set(), set(), set()])
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].add(id)
+        else:
+            if not check_availability(myself, node, "tx", id):
+                nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].add(id)
+# -----------------------
 
 
 def generate_new_tx(myself):
     global nodeState, tx_id
 
-    new_tx = (tx_id, "This transaction spends " + str(random.randint(0, 100)) + " Bitcoins", myself,
-              numpy.random.randint(min_tx_size, max_tx_size))
+    new_tx = (tx_id, "This transaction spends " + str(random.randint(0, 100)) + " Bitcoins", myself, 700)
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].add(new_tx[TX_ID])
     nodeState[myself][NODE_MEMPOOL].append(new_tx)
-    nodeState[myself][NODE_vINV_TX_TO_SEND].append(("MSG_TX", new_tx[TX_ID]))
+    push_to_send(myself, new_tx[TX_ID])
+
     tx_id += 1
 
 
@@ -540,33 +601,46 @@ def get_tx_to_block(myself):
     return tx_array
 
 
+def broadcast_invs(myself):
+    for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        if target in nodeState[myself][NODE_NEIGHBOURHOOD_INV].keys() and \
+                len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
+            inv_to_send = []
+            for tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
+                if not check_availability(myself, target, "tx", tx):
+                    inv_to_send.append(("MSG_TX", tx))
+            sim.send(INV, target, myself, "INV", inv_to_send)
+            nodeState[myself][MSGS][INV_MSG][SENT] += 1
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].clear()
+
+
 def process_new_headers(myself, source, headers):
     for header in headers:
-        header_in = get_block(myself, header[HEADER_ID])
-        parent_header_in = get_block(myself, header[HEADER_PARENT_ID])
-        if parent_header_in is None and header[HEADER_PARENT_ID] != -1:
-            logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!".format(myself, header[HEADER_PARENT_ID]))
+        block = get_block(myself, header[HEADER_ID])
+        parent_block = get_block(myself, header[HEADER_PARENT_ID])
+        update_neighbourhood_inv(myself, source, "block", header[HEADER_ID])
+        update_neighbourhood_inv(myself, source, "block", header[HEADER_PARENT_ID])
+
+        if parent_block is None and header[HEADER_PARENT_ID] != -1:
+            # TODO REFACTOR
+            logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!"
+                        .format(myself, header[HEADER_PARENT_ID]))
             headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
             sim.send(GETHEADERS, source, myself, "GETHEADERS", headers_to_request)
-            nodeState[myself][GETHEADERS_MSG][SENT] += 1
+            nodeState[myself][MSGS][GETHEADERS_MSG][SENT] += 1
             continue
-        elif parent_header_in is not None and not check_availability(myself, source, parent_header_in[BLOCK_ID]):
-            update_availability(myself, source, parent_header_in[BLOCK_ID])
 
-        if header_in is None:
+        elif (parent_block is not None or header[HEADER_PARENT_ID] == -1) and block is None:
             nodeState[myself][NODE_RECEIVED_BLOCKS].append(header)
-            update_availability(myself, source, header[HEADER_ID])
-        elif not check_availability(myself, source, header_in[BLOCK_ID]):
-            update_availability(myself, source, header_in[BLOCK_ID])
 
 
 def get_data_to_request(myself, source):
     data_to_request = []
     for block in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
-        if len(block) == 4 and check_availability(myself, source, block[BLOCK_ID]) and \
+        if len(block) == 4 and check_availability(myself, source, "block", block[BLOCK_ID]) and \
                 block[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
             data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
-            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].append(block[BLOCK_ID])
+            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].add(block[BLOCK_ID])
         elif len(block) == 4 or len(block) == 6:
             continue
         else:
@@ -575,6 +649,17 @@ def get_data_to_request(myself, source):
                              "expected size. This condition is not coded and shouldn't happen {}".format(block))
 
     return data_to_request
+
+
+def new_connection(myself, source):
+    if len(nodeState[myself][NODE_NEIGHBOURHOOD]) > 125:
+        raise ValueError("Number of connections in one node exceed the maximum allowed")
+
+    if source in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        return
+    else:
+        nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [set(), set(), set()]
 
 
 def write_to_log(file, line):
@@ -588,15 +673,15 @@ def wrapup():
     logger.info("Wrapping up")
     #logger.info(nodeState)
 
-    inv_messages = map(lambda x: nodeState[x][INV_MSG], nodeState)
-    getheaders_messages = map(lambda x: nodeState[x][GETHEADERS_MSG], nodeState)
-    headers_messages = map(lambda x: nodeState[x][HEADERS_MSG], nodeState)
-    getdata_messages = map(lambda x: nodeState[x][GETDATA_MSG], nodeState)
-    block_messages = map(lambda x: nodeState[x][BLOCK_MSG], nodeState)
-    cmpctblock_messages = map(lambda x: nodeState[x][CMPCTBLOCK_MSG], nodeState)
-    getblocktx_messages = map(lambda x: nodeState[x][GETBLOCKTXN_MSG], nodeState)
-    blocktx_messages = map(lambda x: nodeState[x][BLOCKTXN_MSG], nodeState)
-    tx_messages = map(lambda x: nodeState[x][TX_MSG], nodeState)
+    inv_messages = map(lambda x: nodeState[x][MSGS][INV_MSG], nodeState)
+    getheaders_messages = map(lambda x: nodeState[x][MSGS][GETHEADERS_MSG], nodeState)
+    headers_messages = map(lambda x: nodeState[x][MSGS][HEADERS_MSG], nodeState)
+    getdata_messages = map(lambda x: nodeState[x][MSGS][GETDATA_MSG], nodeState)
+    block_messages = map(lambda x: nodeState[x][MSGS][BLOCK_MSG], nodeState)
+    cmpctblock_messages = map(lambda x: nodeState[x][MSGS][CMPCTBLOCK_MSG], nodeState)
+    getblocktx_messages = map(lambda x: nodeState[x][MSGS][GETBLOCKTXN_MSG], nodeState)
+    blocktx_messages = map(lambda x: nodeState[x][MSGS][BLOCKTXN_MSG], nodeState)
+    tx_messages = map(lambda x: nodeState[x][MSGS][TX_MSG], nodeState)
 
     sum_received_blocks = map(lambda x: nodeState[x][NODE_RECEIVED_BLOCKS], nodeState)
     receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
@@ -612,7 +697,6 @@ def wrapup():
                         ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
                          '           sum_received_blocks                    receivedBlocks'])
 
-    utils.compute_average_of_message("getblocktx", getblocktx_messages, dumpPath)
 
  #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
   #      cPickle.dump(receivedMessages, f)
@@ -620,8 +704,23 @@ def wrapup():
 
 
 def createNode(neighbourhood):
-    return [0, [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], None, neighbourhood,
-            [], [], {}, [], [], [], [], -1]
+    current_cycle = 0
+    node_current_block = None
+    node_inv = [set(), set()]
+    node_received_blocks = []
+    node_partial_blocks = []
+    node_mempool = []
+    node_blocks_already_requested = set()
+    node_tx_already_requested = set()
+    node_time_to_gen = -1
+    node_neighbourhood_inv = {}
+    for neighbour in neighbourhood:
+        node_neighbourhood_inv[neighbour] = [set(), set(), set()]
+    msgs = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
+
+    return [current_cycle, node_current_block, node_inv, node_received_blocks, node_partial_blocks, node_mempool,
+            node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
+            node_neighbourhood_inv, msgs]
 
 
 def configure(config):
@@ -665,7 +764,7 @@ def configure(config):
     tx_gened = [0] * nbCycles
 
     values = []
-    i = 0
+    i = -1
     j = 20
     while i < 20:
         values.append((i, i + 1, j))

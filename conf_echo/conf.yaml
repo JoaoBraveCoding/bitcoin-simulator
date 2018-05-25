@@ -1,9 +1,9 @@
 # system settings, mandatory
-nbNodes : 250
+nbNodes : 200
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
-nbCycles : 720
+nbCycles : 60
 # duration of node cycle
 NODE_CYCLE: 12500
 # node cycle drift, zero means perfect clocks 
@@ -37,6 +37,7 @@ PROB_GEN_BLOCK: 0.1
 # 250000/(24*6) ~=1,736
 # 250000/(24*12) ~= 868
 # 250000/(24*6*10) ~= 174
+# 250000/(24*6*20) ~= 87
 NUMB_TX_PER_CYCLE: 174
 
 MIN_TX_SIZE: 401
