@@ -3,7 +3,7 @@ nbNodes : 200
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
-nbCycles : 60
+nbCycles : 720
 # duration of node cycle
 NODE_CYCLE: 12500
 # node cycle drift, zero means perfect clocks 
@@ -47,4 +47,4 @@ MAX_BLOCK_SIZE: 1000000
 NUMBER_OF_MINERS: 16
 EXTRA_REPLICAS: 1
 
-TOP_NODES_SIZE: 5
+TOP_NODES_SIZE: 2

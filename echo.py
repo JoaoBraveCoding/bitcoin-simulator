@@ -1,6 +1,7 @@
 # Sample simulator demo
 # Miguel Matos - miguel.marques.matos@tecnico.ulisboa.pt
 # (c) 2012-2018
+from __future__ import division
 import time
 from collections import defaultdict
 import math
@@ -16,6 +17,7 @@ from sim import sim
 import utils
 
 LOG_TO_FILE = False
+HOP_BASED_BROADCAST = True
 
 BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_EXTRA_TX \
     = 0, 1, 2, 3, 4, 5, 6, 7
@@ -628,7 +630,7 @@ def get_tx_in_block(block, tx_id):
 
 
 def get_nb_of_tx_to_gen(myself, size, cycle):
-    n = number_of_tx_to_gen_per_cycle/size
+    n = number_of_tx_to_gen_per_cycle//size
 
     if n != 0:
         tx_gened[cycle] += n
@@ -661,7 +663,11 @@ def get_tx_to_block(myself):
 def broadcast_invs(myself):
     global nodeState
 
-    for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
+
+    nodes_to_send = get_nodes_to_send(myself)
+
+
+    for target in nodes_to_send:
         if len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
             inv_to_send = []
             for tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
@@ -670,6 +676,27 @@ def broadcast_invs(myself):
             sim.send(INV, target, myself, "INV", inv_to_send)
             nodeState[myself][MSGS][INV_MSG][SENT] += 1
             nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].clear()
+
+
+def get_nodes_to_send(myself):
+    if not HOP_BASED_BROADCAST or not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
+        return nodeState[myself][NODE_NEIGHBOURHOOD]
+
+    total = top_nodes_size * 2
+    top_nodes = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]
+    if len(nodeState[myself][NODE_NEIGHBOURHOOD]) < total:
+        total = len(nodeState[myself][NODE_NEIGHBOURHOOD]) - len(top_nodes)
+    else:
+        total = total - len(top_nodes)
+
+    collection_of_neighbours = list(nodeState[myself][NODE_NEIGHBOURHOOD])
+    for node in top_nodes:
+        if node in collection_of_neighbours:
+            collection_of_neighbours.remove(node)
+
+    random_nodes = random.sample(collection_of_neighbours, total)
+
+    return top_nodes + random_nodes
 
 
 def process_new_headers(myself, source, headers):
@@ -765,6 +792,11 @@ def wrapup():
  #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
   #      cPickle.dump(receivedMessages, f)
    #     cPickle.dump(sentMessages, f)
+    sum = 0
+    for tx in tx_messages:
+        sum += tx[0]
+
+    print(sum/len(tx_messages))
 
 
 def createNode(neighbourhood):
@@ -832,7 +864,6 @@ def configure(config):
     f = open("logs/missingTxs.txt", "w")
     f.close()
 
-
     tx_gened = [0] * nbCycles
 
     values = []
@@ -880,7 +911,7 @@ def configure(config):
 
         nbNodes = nbNodes + (extra_replicas * number_of_miners)
 
-    if number_of_tx_to_gen_per_cycle/nbNodes == 0:
+    if number_of_tx_to_gen_per_cycle//nbNodes == 0:
         nodes_to_gen_tx = []
         for i in range(0, nbCycles):
             nodes_to_gen_tx.append(random.sample(xrange(nbNodes), number_of_tx_to_gen_per_cycle))
