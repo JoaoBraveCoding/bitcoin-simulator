@@ -60,7 +60,7 @@ def CYCLE(myself):
 
     # If a node can generate transactions
     i = 0
-    n = get_nb_of_tx_to_gen(len(nodeState), nodeState[myself][CURRENT_CYCLE])
+    n = get_nb_of_tx_to_gen(myself, len(nodeState), nodeState[myself][CURRENT_CYCLE])
     while i < n:
         generate_new_tx(myself)
         i = i + 1
@@ -109,14 +109,14 @@ def INV(myself, source, msg1, vInv):
     for inv in vInv:
         if inv[INV_TYPE] == "MSG_TX":
             update_neighbourhood_inv(myself, source, "tx", inv[INV_CONTENT_ID])
-            seen_tx = seen_it(myself, "tx", inv[INV_CONTENT_ID])
+            seen_tx = have_it(myself, "tx", inv[INV_CONTENT_ID])
             if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].add(inv[INV_CONTENT_ID])
 
         elif inv[INV_TYPE] == "MSG_BLOCK":
             update_neighbourhood_inv(myself, source, "block", inv[INV_CONTENT_ID])
-            seen_block = seen_it(myself, "block", inv[INV_CONTENT_ID])
+            seen_block = have_it(myself, "block", inv[INV_CONTENT_ID])
             if not seen_block:
                 headers_to_request.append(inv[INV_CONTENT_ID])
 
@@ -229,7 +229,7 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     nodeState[myself][MSGS][CMPCTBLOCK_MSG][RECEIVED] += 1
 
-    if seen_it(myself, "block", cmpctblock[BLOCK_ID]):
+    if have_it(myself, "block", cmpctblock[BLOCK_ID]):
         return
 
     if cmpctblock[BLOCK_EXTRA_TX]:
@@ -295,7 +295,7 @@ def BLOCKTXN(myself, source, msg1, tx_requested):
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     nodeState[myself][MSGS][BLOCKTXN_MSG][RECEIVED] += 1
 
-    if seen_it(myself, "block", tx_requested[0]):
+    if have_it(myself, "block", tx_requested[0]):
         return
 
     for tx in tx_requested[1]:
@@ -317,13 +317,15 @@ def TX(myself, source, msg1, tx):
         nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
 
     update_neighbourhood_inv(myself, source, "tx", tx[TX_ID])
-    if not seen_it(myself, "tx", tx[TX_ID]):
-        update_seen_inv(myself, "tx", tx[TX_ID])
+    if not have_it(myself, "tx", tx[TX_ID]):
+        update_have_it(myself, "tx", tx[TX_ID])
         nodeState[myself][NODE_MEMPOOL].append(tx)
         push_to_send(myself, tx[TX_ID])
 
 
 def next_t_to_gen(myself):
+    global nodeState
+
     y = numpy.random.normal(0.5, 0.13)
     if y > 1:
         x = - 10 * numpy.log(1-0.99)
@@ -367,11 +369,11 @@ def process_block(myself, source, block, type):
     global nodeState
 
     # Check if it's a new block
-    if not seen_it(myself, "block", block[BLOCK_ID]):
+    if not have_it(myself, "block", block[BLOCK_ID]):
         if myself == 0:
             write_to_log("blocksReceived", str(time.time()) + " " + str(block[BLOCK_ID]) + " " + str(block[BLOCK_TIMESTAMP])
                          + " " + type)
-        update_seen_inv(myself, "block", block[BLOCK_ID])
+        update_have_it(myself, "block", block[BLOCK_ID])
         update_block(myself, block)
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
                 block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
@@ -405,8 +407,8 @@ def update_tx(myself, block):
         if tx in nodeState[myself][NODE_MEMPOOL]:
             nodeState[myself][NODE_MEMPOOL].remove(tx)
 
-            for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
-                update_neighbourhood_inv(myself, neighbour, "tx", tx[TX_ID])
+        for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
+            update_neighbourhood_inv(myself, neighbour, "tx", tx[TX_ID])
 
         if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
@@ -481,18 +483,22 @@ def get_block_header(block):
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE]
 
 
-def seen_it(myself, type, id):
+def have_it(myself, type, id):
+    global nodeState
+
     if type != "block" and type != "tx":
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if type == "block" and id in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS] or \
-        type == "tx" and id in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
+    if (type == "block" and id in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]) or \
+            (type == "tx" and id in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]):
         return True
     return False
 
 
-def update_seen_inv(myself, type, id):
+def update_have_it(myself, type, id):
+    global nodeState
+
     if type != "block" and type != "tx":
         print("check_availability strange type {}".format(type))
         exit(-1)
@@ -508,11 +514,15 @@ def update_seen_inv(myself, type, id):
 
 # Neighbourhood update and check functions
 def update_neighbourhood_inv(myself, target, type, id):
+    global nodeState
+
     if type != "block" and type != "tx":
         print("check_availability strange type {}".format(type))
         exit(-1)
 
     if type == "block":
+        if id == -1:
+            return
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS].add(id)
     elif type == "tx":
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX].add(id)
@@ -528,22 +538,18 @@ def check_availability(myself, target, type, id):
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if target not in nodeState[myself][NODE_NEIGHBOURHOOD_INV].keys():
-        return False
-    if type == "block" and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS] or \
-        type == "tx" and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]:
+    if (type == "block" and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS]) or \
+            (type == "tx" and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]):
         return True
     return False
 
 
 def push_to_send(myself, id):
+    global nodeState
+
     for node in nodeState[myself][NODE_NEIGHBOURHOOD]:
-        if node not in nodeState[myself][NODE_NEIGHBOURHOOD_INV].keys():
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV].setdefault(node, [set(), set(), set()])
+        if not check_availability(myself, node, "tx", id):
             nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].add(id)
-        else:
-            if not check_availability(myself, node, "tx", id):
-                nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].add(id)
 # -----------------------
 
 
@@ -572,24 +578,26 @@ def get_tx_in_block(block, tx_id):
     return None
 
 
-def get_nb_of_tx_to_gen(size, cycle):
-    n = number_of_to_gen_per_cycle/size
+def get_nb_of_tx_to_gen(myself, size, cycle):
+    n = number_of_tx_to_gen_per_cycle/size
 
     if n != 0:
         tx_gened[cycle] += n
         return n
     else:
-        if tx_gened[cycle] < number_of_to_gen_per_cycle:
-            if random.random() > 0.5:
-                tx_gened[cycle] += 1
-                return 1
+        if myself in nodes_to_gen_tx[cycle]:
+            tx_gened[cycle] += 1
+            return 1
         return 0
 
 
 def get_tx_to_block(myself):
+    global nodeState
+
     size = 0
     tx_array = []
-    for tx in nodeState[myself][NODE_MEMPOOL]:
+    list_to_iter = list(nodeState[myself][NODE_MEMPOOL])
+    for tx in list_to_iter:
         if size + tx[TX_SIZE] <= max_block_size:
             size += tx[TX_SIZE]
             tx_array.append(tx)
@@ -602,9 +610,10 @@ def get_tx_to_block(myself):
 
 
 def broadcast_invs(myself):
+    global nodeState
+
     for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-        if target in nodeState[myself][NODE_NEIGHBOURHOOD_INV].keys() and \
-                len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
+        if len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
             inv_to_send = []
             for tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
                 if not check_availability(myself, target, "tx", tx):
@@ -615,6 +624,8 @@ def broadcast_invs(myself):
 
 
 def process_new_headers(myself, source, headers):
+    global nodeState
+
     for header in headers:
         block = get_block(myself, header[HEADER_ID])
         parent_block = get_block(myself, header[HEADER_PARENT_ID])
@@ -635,6 +646,8 @@ def process_new_headers(myself, source, headers):
 
 
 def get_data_to_request(myself, source):
+    global nodeState
+
     data_to_request = []
     for block in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
         if len(block) == 4 and check_availability(myself, source, "block", block[BLOCK_ID]) and \
@@ -652,6 +665,8 @@ def get_data_to_request(myself, source):
 
 
 def new_connection(myself, source):
+    global nodeState
+
     if len(nodeState[myself][NODE_NEIGHBOURHOOD]) > 125:
         raise ValueError("Number of connections in one node exceed the maximum allowed")
 
@@ -696,8 +711,6 @@ def wrapup():
                         dumpPath + '/messages-' + str(runId) + '.gpData',
                         ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
                          '           sum_received_blocks                    receivedBlocks'])
-
-
  #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
   #      cPickle.dump(receivedMessages, f)
    #     cPickle.dump(sentMessages, f)
@@ -724,8 +737,8 @@ def createNode(neighbourhood):
 
 
 def configure(config):
-    global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id,\
-        number_of_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values
+    global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id, \
+        number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -744,7 +757,7 @@ def configure(config):
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
     prob_generating_block = config['PROB_GEN_BLOCK']
     max_block_number = int(config['MAX_NUMBER_OF_BLOCKS'])
-    number_of_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
+    number_of_tx_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
     nodeDrift = int(nodeCycle * float(config['NODE_DRIFT']))
 
     max_block_size = int(config['MAX_BLOCK_SIZE'])
@@ -790,6 +803,11 @@ def configure(config):
         while neighbourhood.__contains__(n):
             neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
         nodeState[n] = createNode(neighbourhood)
+
+    if number_of_tx_to_gen_per_cycle/nbNodes == 0:
+        nodes_to_gen_tx = []
+        for i in range(0, nbCycles):
+            nodes_to_gen_tx.append(random.sample(xrange(nbNodes), number_of_tx_to_gen_per_cycle))
 
     sim.init(nodeCycle, nodeDrift, latencyTable, latencyDrift)
 
