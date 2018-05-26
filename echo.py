@@ -17,7 +17,8 @@ import utils
 
 LOG_TO_FILE = False
 
-BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_EXTRA_TX = 0, 1, 2, 3, 4, 5, 6
+BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_EXTRA_TX \
+    = 0, 1, 2, 3, 4, 5, 6, 7
 TX_ID, TX_CONTENT, TX_GEN_NODE, TX_SIZE = 0, 1, 2, 3
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
@@ -346,10 +347,10 @@ def generate_new_block(myself):
     # Not first block which means getting highest block to be the parent
     tx_array = get_tx_to_block(myself)
     if nodeState[myself][NODE_CURRENT_BLOCK] is None:
-        new_block = (block_id, -1, 0, time.time(), myself, tx_array)
+        new_block = (block_id, -1, 0, time.time(), myself, tx_array, 0)
     else:
         highest_block = nodeState[myself][NODE_CURRENT_BLOCK]
-        new_block = (block_id, highest_block[BLOCK_ID], highest_block[BLOCK_HEIGHT] + 1, time.time(), myself, tx_array)
+        new_block = (block_id, highest_block[BLOCK_ID], highest_block[BLOCK_HEIGHT] + 1, time.time(), myself, tx_array, 0)
 
     # Store the new block
     nodeState[myself][NODE_RECEIVED_BLOCKS].append(new_block)
@@ -357,6 +358,12 @@ def generate_new_block(myself):
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block
     block_id += 1
     return new_block
+
+
+def inc_tll(block):
+    lst = list(block)
+    lst[BLOCK_TTL] += 1
+    return tuple(lst)
 
 
 def get_block(myself, block_id):
@@ -385,16 +392,17 @@ def process_block(myself, source, block, type):
         update_tx(myself, block)
 
         # Broadcast new block
-        update_neighbourhood_inv(myself, source, "block", block[BLOCK_ID])
+        block_to_send = inc_tll(block)
+        update_neighbourhood_inv(myself, source, "block", block_to_send[BLOCK_ID])
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if target == source or check_availability(myself, target, "block", block[BLOCK_ID]):
+            if target == source or check_availability(myself, target, "block", block_to_send[BLOCK_ID]):
                 continue
-            elif check_availability(myself, target, "block", block[BLOCK_PARENT_ID]):
-                sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(block))
+            elif check_availability(myself, target, "block", block_to_send[BLOCK_PARENT_ID]):
+                sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(block_to_send))
                 nodeState[myself][MSGS][CMPCTBLOCK_MSG][SENT] += 1
-                update_neighbourhood_inv(myself, target, "block", block[BLOCK_ID])
+                update_neighbourhood_inv(myself, target, "block", block_to_send[BLOCK_ID])
             else:
-                sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block)])
+                sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block_to_send)])
                 nodeState[myself][MSGS][HEADERS_MSG][SENT] += 1
 
     else:
@@ -438,7 +446,7 @@ def cmpctblock(block):
     for tx in block[BLOCK_TX]:
         cmpct_tx.append(tx[TX_ID])
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx,\
-            get_extra_tx_to_send(block[BLOCK_TX])
+           block[BLOCK_TTL], get_extra_tx_to_send(block[BLOCK_TX])
 
 
 def get_cmpctblock(myself, block_id):
@@ -655,7 +663,7 @@ def get_data_to_request(myself, source):
                 block[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
             data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
             nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].add(block[BLOCK_ID])
-        elif len(block) == 4 or len(block) == 6:
+        elif len(block) == 4 or len(block) == 7:
             continue
         else:
             # This condition shouldn't happen in a simulated scenario
@@ -701,7 +709,8 @@ def wrapup():
 
     sum_received_blocks = map(lambda x: nodeState[x][NODE_RECEIVED_BLOCKS], nodeState)
     receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
-                                                  sum_received_blocks[x][y][2], sum_received_blocks[x][y][3]),
+                                                  sum_received_blocks[x][y][2], sum_received_blocks[x][y][3],
+                                                  sum_received_blocks[x][y][4], sum_received_blocks[x][y][6]),
                                        xrange(len(sum_received_blocks[x]))), nodeState)
     sum_received_blocks = map(lambda x: map(lambda y: sum_received_blocks[x][y][0], xrange(len(sum_received_blocks[x]))), nodeState)
 
@@ -823,7 +832,6 @@ def configure(config):
         miners.append(miners_to_add)
 
         nbNodes = nbNodes + (extra_replicas * number_of_miners)
-
 
     if number_of_tx_to_gen_per_cycle/nbNodes == 0:
         nodes_to_gen_tx = []
