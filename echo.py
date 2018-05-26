@@ -72,20 +72,21 @@ def CYCLE(myself):
     if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE] and \
             (max_block_number == 0 or block_id < max_block_number):
         next_t_to_gen(myself)
-        new_block = generate_new_block(myself)
+        if myself in miners or (myself not in miners and random.random() < 0.052):
+            new_block = generate_new_block(myself)
 
-        # Check if can send as cmpct or send through inv
-        for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if check_availability(myself, target, "block", new_block[BLOCK_PARENT_ID]):
-                sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(new_block))
-                nodeState[myself][MSGS][CMPCTBLOCK_MSG][SENT] += 1
-                update_neighbourhood_inv(myself, target, "block", new_block[BLOCK_ID])
+            # Check if can send as cmpct or send through inv
+            for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
+                if check_availability(myself, target, "block", new_block[BLOCK_PARENT_ID]):
+                    sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(new_block))
+                    nodeState[myself][MSGS][CMPCTBLOCK_MSG][SENT] += 1
+                    update_neighbourhood_inv(myself, target, "block", new_block[BLOCK_ID])
 
-            else:
-                vInv = [("MSG_BLOCK", new_block[BLOCK_ID])]
-                # TODO change this send header and inv of possible parents
-                sim.send(INV, target, myself, "INV", vInv)
-                nodeState[myself][MSGS][INV_MSG][SENT] += 1
+                else:
+                    vInv = [("MSG_BLOCK", new_block[BLOCK_ID])]
+                    # TODO change this send header and inv of possible parents
+                    sim.send(INV, target, myself, "INV", vInv)
+                    nodeState[myself][MSGS][INV_MSG][SENT] += 1
 
     # Send new transactions either created or received
     broadcast_invs(myself)
@@ -738,7 +739,7 @@ def createNode(neighbourhood):
 
 def configure(config):
     global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id, \
-        number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx
+        number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -763,6 +764,8 @@ def configure(config):
     max_block_size = int(config['MAX_BLOCK_SIZE'])
     min_tx_size = int(config['MIN_TX_SIZE'])
     max_tx_size = int(config['MAX_TX_SIZE'])
+    number_of_miners = int(config['NUMBER_OF_MINERS'])
+    extra_replicas = int(config['EXTRA_REPLICAS'])
 
 
     latencyTablePath = config['LATENCY_TABLE']
@@ -803,6 +806,24 @@ def configure(config):
         while neighbourhood.__contains__(n):
             neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
         nodeState[n] = createNode(neighbourhood)
+
+    miners = random.sample(xrange(nbNodes), number_of_miners)
+
+    if extra_replicas > 0:
+        i = 0
+        miners_to_add = []
+        for n in xrange(nbNodes, nbNodes + (extra_replicas * number_of_miners)):
+            neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
+            while neighbourhood.__contains__(n) or neighbourhood.__contains__(miners[i]):
+                neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
+            neighbourhood.append(miners[i])
+            nodeState[n] = createNode(neighbourhood)
+            miners_to_add.append(n)
+            i += 1
+        miners.append(miners_to_add)
+
+        nbNodes = nbNodes + (extra_replicas * number_of_miners)
+
 
     if number_of_tx_to_gen_per_cycle/nbNodes == 0:
         nodes_to_gen_tx = []
