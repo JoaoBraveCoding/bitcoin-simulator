@@ -24,12 +24,16 @@ INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
 
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_RECEIVED_BLOCKS, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, \
-    NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, MSGS \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, \
+    NODE_NEIGHBOURHOOD_STATS, MSGS = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
 NEIGHBOURHOOD_KNOWN_BLOCKS, NEIGHBOURHOOD_KNOWN_TX, NEIGHBOURHOOD_TX_TO_SEND = 0, 1, 2
+
+TOP_N_NODES, STATS = 0, 1
+
+TOTAL_TLL, TOTAL_MSG_RECEIVED = 0, 1
 
 INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG \
     = 0, 1, 2, 3, 4, 5, 6, 7, 8
@@ -373,6 +377,40 @@ def get_block(myself, block_id):
     return None
 
 
+def update_neighbour_statistics(myself, source, block_ttl):
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_TLL] += block_ttl
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_MSG_RECEIVED] += 1
+    total_ttl = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_TLL]
+    total_msg = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_MSG_RECEIVED]
+    update_top(myself, source, total_ttl/total_msg)
+
+
+def update_top(myself, source, score):
+    if source in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
+        return
+
+    if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] or \
+            len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < top_nodes_size:
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(source)
+
+    worst_score = -1
+    worst_index = -1
+    for i in range(0, len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES])):
+        node = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][i]
+        total_ttl = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][node][TOTAL_TLL]
+        total_msg = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][node][TOTAL_MSG_RECEIVED]
+        member_score = total_ttl/total_msg
+        if member_score <= score:
+            continue
+        elif member_score > score and worst_score < member_score:
+            worst_score = member_score
+            worst_index = i
+        else:
+            continue
+
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
+
+
 def process_block(myself, source, block, type):
     global nodeState
 
@@ -392,6 +430,7 @@ def process_block(myself, source, block, type):
         update_tx(myself, block)
 
         # Broadcast new block
+        update_neighbour_statistics(myself, source, block[BLOCK_TTL])
         block_to_send = inc_tll(block)
         update_neighbourhood_inv(myself, source, "block", block_to_send[BLOCK_ID])
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
@@ -406,6 +445,7 @@ def process_block(myself, source, block, type):
                 nodeState[myself][MSGS][HEADERS_MSG][SENT] += 1
 
     else:
+        update_neighbour_statistics(myself, source, block[BLOCK_TTL])
         update_neighbourhood_inv(myself, source, "block", block[BLOCK_ID])
 
 
@@ -684,6 +724,7 @@ def new_connection(myself, source):
     else:
         nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [set(), set(), set()]
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
 
 
 def write_to_log(file, line):
@@ -737,18 +778,24 @@ def createNode(neighbourhood):
     node_tx_already_requested = set()
     node_time_to_gen = -1
     node_neighbourhood_inv = {}
+    stats = {}
+    topx = []
     for neighbour in neighbourhood:
         node_neighbourhood_inv[neighbour] = [set(), set(), set()]
+        stats[neighbour] = [0, 0]
+    node_neighbourhood_stats = [topx, stats]
+
     msgs = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_received_blocks, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
-            node_neighbourhood_inv, msgs]
+            node_neighbourhood_inv, node_neighbourhood_stats, msgs]
 
 
 def configure(config):
     global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id, \
-        number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners
+        number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
+        top_nodes_size
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -775,7 +822,7 @@ def configure(config):
     max_tx_size = int(config['MAX_TX_SIZE'])
     number_of_miners = int(config['NUMBER_OF_MINERS'])
     extra_replicas = int(config['EXTRA_REPLICAS'])
-
+    top_nodes_size = int(config['TOP_NODES_SIZE'])
 
     latencyTablePath = config['LATENCY_TABLE']
     latencyValue = None
