@@ -3,7 +3,7 @@ nbNodes : 200
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
-nbCycles : 720
+nbCycles : 60
 # duration of node cycle
 NODE_CYCLE: 12500
 # node cycle drift, zero means perfect clocks 

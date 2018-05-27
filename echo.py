@@ -2,6 +2,8 @@
 # Miguel Matos - miguel.marques.matos@tecnico.ulisboa.pt
 # (c) 2012-2018
 from __future__ import division
+
+import csv
 import time
 from collections import defaultdict
 import math
@@ -37,8 +39,8 @@ TOP_N_NODES, STATS = 0, 1
 
 TOTAL_TLL, TOTAL_MSG_RECEIVED = 0, 1
 
-INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8
+INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG, MISSING_TX \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 SENT, RECEIVED = 0, 1
 
@@ -237,7 +239,10 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     nodeState[myself][MSGS][CMPCTBLOCK_MSG][RECEIVED] += 1
 
-    if have_it(myself, "block", cmpctblock[BLOCK_ID]):
+    in_mem_cmpctblock = get_cmpctblock(myself, cmpctblock[BLOCK_ID])
+    if have_it(myself, "block", cmpctblock[BLOCK_ID]) or in_mem_cmpctblock is not None:
+        update_neighbour_statistics(myself, source, cmpctblock[BLOCK_TTL])
+        update_neighbourhood_inv(myself, source, "block", cmpctblock[BLOCK_ID])
         return
 
     if cmpctblock[BLOCK_EXTRA_TX]:
@@ -261,13 +266,10 @@ def CMPCTBLOCK(myself, source, msg1, cmpctblock):
     if tx_to_request:
         sim.send(GETBLOCKTXN, source, myself, "GETBLOCKTXN", (cmpctblock[BLOCK_ID], tx_to_request))
         nodeState[myself][MSGS][GETBLOCKTXN_MSG][SENT] += 1
-
-        if cmpctblock not in nodeState[myself][NODE_PARTIAL_BLOCKS]:
-            # TODO This could be optimized to use tx that we receive from other cmpct blocks
-            nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
-        return
-
-    process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX], "CMPCTBLOCK")
+        nodeState[myself][MSGS][MISSING_TX] += len(tx_to_request)
+        nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
+    else:
+        process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX], "CMPCTBLOCK")
 
 
 def GETBLOCKTXN(myself, source, msg1, tx_request):
@@ -774,6 +776,7 @@ def wrapup():
     getblocktx_messages = map(lambda x: nodeState[x][MSGS][GETBLOCKTXN_MSG], nodeState)
     blocktx_messages = map(lambda x: nodeState[x][MSGS][BLOCKTXN_MSG], nodeState)
     tx_messages = map(lambda x: nodeState[x][MSGS][TX_MSG], nodeState)
+    missing_tx = map(lambda x: nodeState[x][MSGS][MISSING_TX], nodeState)
 
     sum_received_blocks = map(lambda x: nodeState[x][NODE_RECEIVED_BLOCKS], nodeState)
     receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
@@ -792,11 +795,42 @@ def wrapup():
  #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
   #      cPickle.dump(receivedMessages, f)
    #     cPickle.dump(sentMessages, f)
-    sum = 0
-    for tx in tx_messages:
-        sum += tx[0]
+    sum_inv = 0
+    sum_getData = 0
+    sum_tx = 0
+    sum_getBlockTX = 0
+    sum_missingTX = 0
+    for i in range(0, nbNodes):
+        sum_inv += inv_messages[i][SENT]
+        sum_getData += getdata_messages[i][SENT]
+        sum_tx += tx_messages[i][SENT]
+        sum_getBlockTX += getblocktx_messages[i][SENT]
+        sum_missingTX += missing_tx[i]
 
-    print(sum/len(tx_messages))
+    if not os.path.isfile('out/results.csv'):
+        with open('out/results.csv', 'w') as csv_file_to_write:
+            spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
+            spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
+            spam_writer.writerow([nbNodes, nbCycles, number_of_miners, extra_replicas])
+            spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx"])
+            if HOP_BASED_BROADCAST:
+                spam_writer.writerow([top_nodes_size, sum_inv/nbNodes, sum_getData/nbNodes, sum_tx/nbNodes, sum_getBlockTX/nbNodes,
+                                  sum_missingTX/nbNodes])
+            else:
+                spam_writer.writerow(
+                    ["False", sum_inv / nbNodes, sum_getData / nbNodes, sum_tx / nbNodes, sum_getBlockTX / nbNodes,
+                     sum_missingTX / nbNodes])
+
+    else:
+        with open('out/results.csv', 'a') as csv_file_to_write:
+            spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
+            if HOP_BASED_BROADCAST:
+                spam_writer.writerow([top_nodes_size, sum_inv/nbNodes, sum_getData/nbNodes, sum_tx/nbNodes, sum_getBlockTX/nbNodes,
+                                  sum_missingTX/nbNodes])
+            else:
+                spam_writer.writerow(
+                    ["False", sum_inv / nbNodes, sum_getData / nbNodes, sum_tx / nbNodes, sum_getBlockTX / nbNodes,
+                     sum_missingTX / nbNodes])
 
 
 def createNode(neighbourhood):
@@ -817,7 +851,7 @@ def createNode(neighbourhood):
         stats[neighbour] = [0, 0]
     node_neighbourhood_stats = [topx, stats]
 
-    msgs = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
+    msgs = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], 0]
 
     return [current_cycle, node_current_block, node_inv, node_received_blocks, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
@@ -827,7 +861,7 @@ def createNode(neighbourhood):
 def configure(config):
     global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
-        top_nodes_size
+        top_nodes_size, number_of_miners, extra_replicas
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
