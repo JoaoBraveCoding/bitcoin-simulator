@@ -3,6 +3,7 @@
 # (c) 2012-2018
 from __future__ import division
 
+import ast
 import csv
 import time
 from collections import defaultdict
@@ -18,11 +19,8 @@ import numpy
 from sim import sim
 import utils
 
-LOG_TO_FILE = False
-HOP_BASED_BROADCAST = True
-
-BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_EXTRA_TX \
-    = 0, 1, 2, 3, 4, 5, 6, 7
+BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS, BLOCK_EXTRA_TX \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8
 TX_ID, TX_CONTENT, TX_GEN_NODE, TX_SIZE = 0, 1, 2, 3
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID, HEADER_TIMESTAMP, HEADER_GEN_NODE = 0, 1, 2, 3
@@ -78,8 +76,7 @@ def CYCLE(myself):
     if nodeState[myself][NODE_TIME_TO_GEN] == -1:
         next_t_to_gen(myself)
 
-    if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE] and \
-            (max_block_number == 0 or block_id < max_block_number):
+    if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE]:
         next_t_to_gen(myself)
         if myself in miners or (myself not in miners and random.random() < 0.052):
             new_block = generate_new_block(myself)
@@ -102,7 +99,7 @@ def CYCLE(myself):
 
     nodeState[myself][CURRENT_CYCLE] += 1
     # schedule next execution
-    if nodeState[myself][CURRENT_CYCLE] < nbCycles:
+    if nodeState[myself][CURRENT_CYCLE] < nb_cycles:
         sim.schedulleExecution(CYCLE, myself)
 
 
@@ -205,6 +202,8 @@ def GETDATA(myself, source, msg1, requesting_data):
         elif inv[INV_TYPE] == "MSG_BLOCK":
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is not None:
+                if block[BLOCK_GEN_NODE] != myself:
+                    block = inc_tll(block)
                 sim.send(BLOCK, source, myself, "BLOCK", block)
                 nodeState[myself][MSGS][BLOCK_MSG][SENT] += 1
                 update_neighbourhood_inv(myself, source, "block", block[BLOCK_ID])
@@ -355,10 +354,11 @@ def generate_new_block(myself):
     # Not first block which means getting highest block to be the parent
     tx_array = get_tx_to_block(myself)
     if nodeState[myself][NODE_CURRENT_BLOCK] is None:
-        new_block = (block_id, -1, 0, time.time(), myself, tx_array, 0)
+        new_block = (block_id, -1, 0, nodeState[myself][CURRENT_CYCLE], myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
     else:
         highest_block = nodeState[myself][NODE_CURRENT_BLOCK]
-        new_block = (block_id, highest_block[BLOCK_ID], highest_block[BLOCK_HEIGHT] + 1, time.time(), myself, tx_array, 0)
+        new_block = (block_id, highest_block[BLOCK_ID], highest_block[BLOCK_HEIGHT] + 1, nodeState[myself][CURRENT_CYCLE],
+                     myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
 
     # Store the new block
     nodeState[myself][NODE_RECEIVED_BLOCKS].append(new_block)
@@ -371,6 +371,12 @@ def generate_new_block(myself):
 def inc_tll(block):
     lst = list(block)
     lst[BLOCK_TTL] += 1
+    return tuple(lst)
+
+
+def inc_ts(block, cycle):
+    lst = list(block)
+    lst[BLOCK_RECEIVED_TS] = cycle
     return tuple(lst)
 
 
@@ -420,32 +426,30 @@ def process_block(myself, source, block, type):
 
     # Check if it's a new block
     if not have_it(myself, "block", block[BLOCK_ID]):
-        if myself == 0:
-            write_to_log("blocksReceived", str(time.time()) + " " + str(block[BLOCK_ID]) + " " + str(block[BLOCK_TIMESTAMP])
-                         + " " + type)
-        update_have_it(myself, "block", block[BLOCK_ID])
-        update_block(myself, block)
+        block_to_save = inc_ts(block, nodeState[myself][CURRENT_CYCLE])
+        update_have_it(myself, "block", block_to_save[BLOCK_ID])
+        update_block(myself, block_to_save)
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
-                block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
-            nodeState[myself][NODE_CURRENT_BLOCK] = block
+                block_to_save[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
+            nodeState[myself][NODE_CURRENT_BLOCK] = block_to_save
         next_t_to_gen(myself)
 
         # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
-        update_tx(myself, block)
+        update_tx(myself, block_to_save)
 
         # Broadcast new block
-        update_neighbour_statistics(myself, source, block[BLOCK_TTL])
-        block_to_send = inc_tll(block)
-        update_neighbourhood_inv(myself, source, "block", block_to_send[BLOCK_ID])
+        update_neighbour_statistics(myself, source, block_to_save[BLOCK_TTL])
+        update_neighbourhood_inv(myself, source, "block", block_to_save[BLOCK_ID])
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if target == source or check_availability(myself, target, "block", block_to_send[BLOCK_ID]):
+            if target == source or check_availability(myself, target, "block", block_to_save[BLOCK_ID]):
                 continue
-            elif check_availability(myself, target, "block", block_to_send[BLOCK_PARENT_ID]):
+            elif check_availability(myself, target, "block", block_to_save[BLOCK_PARENT_ID]):
+                block_to_send = inc_tll(block_to_save)
                 sim.send(CMPCTBLOCK, target, myself, "CMPCTBLOCK", cmpctblock(block_to_send))
                 nodeState[myself][MSGS][CMPCTBLOCK_MSG][SENT] += 1
                 update_neighbourhood_inv(myself, target, "block", block_to_send[BLOCK_ID])
             else:
-                sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block_to_send)])
+                sim.send(HEADERS, target, myself, "HEADERS", [get_block_header(block_to_save)])
                 nodeState[myself][MSGS][HEADERS_MSG][SENT] += 1
 
     else:
@@ -490,7 +494,7 @@ def cmpctblock(block):
     for tx in block[BLOCK_TX]:
         cmpct_tx.append(tx[TX_ID])
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx,\
-           block[BLOCK_TTL], get_extra_tx_to_send(block[BLOCK_TX])
+           block[BLOCK_TTL], block[BLOCK_RECEIVED_TS], get_extra_tx_to_send(block[BLOCK_TX])
 
 
 def get_cmpctblock(myself, block_id):
@@ -513,9 +517,6 @@ def build_cmpctblock(myself, block_and_tx):
         if isinstance(cmpctblock[BLOCK_TX][i], int):
             for tx_in_block in block_and_tx[1]:
                 if cmpctblock[BLOCK_TX][i] == tx_in_block[TX_ID]:
-                    if myself == 0:
-                        write_to_log("missingTxs", str(time.time()) + " " + str(cmpctblock[BLOCK_ID]) + " "
-                                     + str(tx_in_block[TX_ID]) + " " + str(i) + "/" + str(len(cmpctblock[BLOCK_TX])))
                     cmpctblock[BLOCK_TX][i] = tx_in_block
                     block_and_tx[1].remove(tx_in_block)
                     break
@@ -635,11 +636,11 @@ def get_nb_of_tx_to_gen(myself, size, cycle):
     n = number_of_tx_to_gen_per_cycle//size
 
     if n != 0:
-        tx_gened[cycle] += n
+        tx_generated[cycle] += n
         return n
     else:
         if myself in nodes_to_gen_tx[cycle]:
-            tx_gened[cycle] += 1
+            tx_generated[cycle] += 1
             return 1
         return 0
 
@@ -665,9 +666,7 @@ def get_tx_to_block(myself):
 def broadcast_invs(myself):
     global nodeState
 
-
     nodes_to_send = get_nodes_to_send(myself)
-
 
     for target in nodes_to_send:
         if len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
@@ -681,7 +680,7 @@ def broadcast_invs(myself):
 
 
 def get_nodes_to_send(myself):
-    if not HOP_BASED_BROADCAST or not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
+    if not hop_based_broadcast or not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return nodeState[myself][NODE_NEIGHBOURHOOD]
 
     total = top_nodes_size * 2
@@ -732,7 +731,7 @@ def get_data_to_request(myself, source):
                 block[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
             data_to_request.append(("MSG_BLOCK", block[BLOCK_ID]))
             nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].add(block[BLOCK_ID])
-        elif len(block) == 4 or len(block) == 7:
+        elif len(block) == 4 or len(block) == 8:
             continue
         else:
             # This condition shouldn't happen in a simulated scenario
@@ -760,6 +759,106 @@ def write_to_log(file, line):
     f = open("logs/" + file + ".txt", "a+")
     f.write(line + "\n")
     f.close()
+
+
+def avg_block_dissemination():
+    dissemination_times = []
+    total_unseen_blocks = 0
+    for i in range(0, block_id):
+        block_creation_ts = -1
+        worst_ts = 0
+        for myself in range(0, nb_nodes):
+            block = get_block(myself, i)
+            if block is None:
+                total_unseen_blocks += 1
+                continue
+
+            if block_creation_ts == -1:
+                block_creation_ts = block[BLOCK_TIMESTAMP]
+                worst_ts = block[BLOCK_RECEIVED_TS]
+            elif worst_ts < block[BLOCK_RECEIVED_TS]:
+                worst_ts = block[BLOCK_RECEIVED_TS]
+        dissemination_times.append(worst_ts-block_creation_ts)
+
+    total = sum(dissemination_times)
+    print("Total unseen blocks {}".format(total_unseen_blocks))
+    return total/block_id
+
+
+def get_all_genesis():
+    genesis = []
+    for myself in range(0, nb_nodes):
+        for block in nodeState[myself][NODE_RECEIVED_BLOCKS]:
+            if block[BLOCK_HEIGHT] == 0 and block[BLOCK_ID] not in genesis:
+                genesis.append(block[BLOCK_ID])
+    return genesis
+
+
+def forkq_rate():
+    branches = get_all_genesis()
+    all_blocks = list(range(0, block_id))
+    i = 0
+
+    while len(all_blocks) != 0:
+        current_block = branches[i]
+        all_blocks.remove(current_block)
+        found = False
+
+        for myself in range(0, nb_nodes):
+            for potential in all_blocks:
+                potential_block = get_block(myself, potential)
+                if potential_block is None:
+                    continue
+
+                if potential_block[BLOCK_PARENT_ID] == current_block and potential not in branches:
+                    found = True
+                    branches.append(potential)
+
+        if len(all_blocks) == 0:
+            break
+
+        if not found:
+            i += 1
+        elif found:
+            branches.pop(i)
+
+    return len(branches)
+
+
+def get_miner_hops():
+    seen = {}
+    depth = 0
+    for miner in miners:
+        seen[miner] = depth
+
+    to_call = list(miners)
+    called = list(miners)
+    seen = count_hops(to_call, called, seen, depth)
+
+    further = numpy.amax(seen.values())
+    counter = [0] * (further + 1)
+    for node in seen.keys():
+        counter[seen[node]] += 1
+
+    return counter
+
+
+def count_hops(to_call, called, seen, depth):
+    if len(to_call) == 0:
+        return seen
+
+    dup_to_call = list(to_call)
+    for calling in dup_to_call:
+        called.append(calling)
+        to_call.remove(calling)
+        if calling not in seen.keys() or seen[calling] > depth:
+            seen[calling] = depth
+
+        for neighbour in nodeState[calling][NODE_NEIGHBOURHOOD]:
+            if neighbour not in called and neighbour not in to_call:
+                to_call.append(neighbour)
+
+    return count_hops(to_call, called, seen, depth + 1)
 
 
 def wrapup():
@@ -792,45 +891,85 @@ def wrapup():
                         dumpPath + '/messages-' + str(runId) + '.gpData',
                         ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
                          '           sum_received_blocks                    receivedBlocks'])
- #   with open(dumpPath + '/dumps-' + str(runId) + '.obj', 'w') as f:
-  #      cPickle.dump(receivedMessages, f)
-   #     cPickle.dump(sentMessages, f)
+
     sum_inv = 0
     sum_getData = 0
     sum_tx = 0
     sum_getBlockTX = 0
     sum_missingTX = 0
-    for i in range(0, nbNodes):
+
+    for i in range(0, nb_nodes):
         sum_inv += inv_messages[i][SENT]
         sum_getData += getdata_messages[i][SENT]
         sum_tx += tx_messages[i][SENT]
         sum_getBlockTX += getblocktx_messages[i][SENT]
         sum_missingTX += missing_tx[i]
 
-    if not os.path.isfile('out/results.csv'):
-        with open('out/results.csv', 'w') as csv_file_to_write:
-            spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
-            spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
-            spam_writer.writerow([nbNodes, nbCycles, number_of_miners, extra_replicas])
-            spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx"])
-            if HOP_BASED_BROADCAST:
-                spam_writer.writerow([top_nodes_size, sum_inv/nbNodes, sum_getData/nbNodes, sum_tx/nbNodes, sum_getBlockTX/nbNodes,
-                                  sum_missingTX/nbNodes])
-            else:
-                spam_writer.writerow(
-                    ["False", sum_inv / nbNodes, sum_getData / nbNodes, sum_tx / nbNodes, sum_getBlockTX / nbNodes,
-                     sum_missingTX / nbNodes])
 
+    avg_block_diss = avg_block_dissemination()
+    nb_forks = forkq_rate()
+    hops_distribution = get_miner_hops()
+
+    first_time = not os.path.isfile('out/{}.csv'.format(results_name))
+    if first_time:
+        csv_file_to_write = open('out/results.csv', 'a')
+        spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
+        spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
+        spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
+        spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx",
+                              "Avg block dissemination", "Total number of branches" "Hops distribution"])
     else:
-        with open('out/results.csv', 'a') as csv_file_to_write:
-            spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
-            if HOP_BASED_BROADCAST:
-                spam_writer.writerow([top_nodes_size, sum_inv/nbNodes, sum_getData/nbNodes, sum_tx/nbNodes, sum_getBlockTX/nbNodes,
-                                  sum_missingTX/nbNodes])
-            else:
-                spam_writer.writerow(
-                    ["False", sum_inv / nbNodes, sum_getData / nbNodes, sum_tx / nbNodes, sum_getBlockTX / nbNodes,
-                     sum_missingTX / nbNodes])
+        csv_file_to_write = open('out/results.csv', 'a')
+        spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
+
+    if not hop_based_broadcast:
+        spam_writer.writerow(["False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
+                              sum_missingTX / nb_nodes, avg_block_diss, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
+    else:
+        spam_writer.writerow([top_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
+                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_block_diss, nb_forks,
+                              ''.join(str(e) + " " for e in hops_distribution)])
+
+
+def save_network():
+    with open('networks/{}-{}-{}'.format(nb_nodes, number_of_miners, extra_replicas), 'w') as file_to_write:
+        file_to_write.write("{} {} {}\n".format(nb_nodes, number_of_miners, extra_replicas))
+        for n in xrange(nb_nodes):
+            file_to_write.write(str(nodeState[n][NODE_NEIGHBOURHOOD]) + '\n')
+        file_to_write.write(str(miners) + '\n')
+
+
+def load_network(filename):
+    global nodeState, nb_nodes, number_of_miners, extra_replicas, miners
+
+    if filename == "":
+        raise ValueError("No file named inputted in not create new run")
+
+    with open('networks/' + filename, 'r') as file_to_read:
+        first_line = file_to_read.readline()
+        nb_nodes, number_of_miners, extra_replicas = first_line.split()
+        nb_nodes, number_of_miners, extra_replicas = int(nb_nodes), int(number_of_miners), int(extra_replicas)
+        nodeState = defaultdict()
+        for n in xrange(nb_nodes):
+            nodeState[n] = createNode(ast.literal_eval(file_to_read.readline()))
+        miners = ast.literal_eval(file_to_read.readline())
+
+
+def create_network(create_new, save_network_connections, neighbourhood_size, filename=""):
+    global nb_nodes, nodeState, miners
+
+    first_time = not os.path.exists("networks/")
+
+    if first_time:
+        os.makedirs("networks/")
+
+    if first_time or create_new:
+        create_nodes_and_miners(neighbourhood_size)
+        create_miner_replicas(neighbourhood_size)
+        if save_network_connections:
+            save_network()
+    else:
+        load_network(filename)
 
 
 def createNode(neighbourhood):
@@ -858,47 +997,71 @@ def createNode(neighbourhood):
             node_neighbourhood_inv, node_neighbourhood_stats, msgs]
 
 
+def create_nodes_and_miners(neighbourhood_size):
+    global nodeState, miners
+
+    nodeState = defaultdict()
+    for n in xrange(nb_nodes):
+        neighbourhood = random.sample(xrange(nb_nodes), neighbourhood_size)
+        while neighbourhood.__contains__(n):
+            neighbourhood = random.sample(xrange(nb_nodes), neighbourhood_size)
+        nodeState[n] = createNode(neighbourhood)
+
+    miners = random.sample(xrange(nb_nodes), number_of_miners)
+
+
+def create_miner_replicas(neighbourhood_size):
+    global nb_nodes, nodeState, miners
+
+    if extra_replicas > 0:
+        i = 0
+        miners_to_add = []
+        for n in xrange(nb_nodes, nb_nodes + (extra_replicas * number_of_miners)):
+            neighbourhood = random.sample(xrange(nb_nodes), neighbourhood_size)
+            while neighbourhood.__contains__(n) or neighbourhood.__contains__(miners[i]):
+                neighbourhood = random.sample(xrange(nb_nodes), neighbourhood_size)
+            neighbourhood.append(miners[i])
+            nodeState[n] = createNode(neighbourhood)
+            miners_to_add.append(n)
+            i += 1
+        miners = miners + miners_to_add
+
+        nb_nodes = nb_nodes + (extra_replicas * number_of_miners)
+
+
 def configure(config):
-    global nbNodes, nbCycles, prob_generating_block, nodeState, nodeCycle, block_id, max_block_number, tx_id, \
-        number_of_tx_to_gen_per_cycle, tx_gened, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
-        top_nodes_size, number_of_miners, extra_replicas
+    global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
+        number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
+        top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas
 
-    IS_CHURN = config.get('CHURN', False)
-    if IS_CHURN:
-        CHURN_RATE = config.get('CHURN_RATE', 0.)
-    MESSAGE_LOSS = float(config.get('MESSASE_LOSS', 0))
-    if MESSAGE_LOSS > 0:
-        sim.setMessageLoss(MESSAGE_LOSS)
+    node_cycle = int(config['NODE_CYCLE'])
 
-    if console_nb_of_nodes == 0:
-        nbNodes = config['nbNodes']
-    else:
-        nbNodes = console_nb_of_nodes
-
-    nbCycles = config['nbCycles']
-    nodeCycle = int(config['NODE_CYCLE'])
+    nb_nodes = config['NUMBER_OF_NODES']
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
-    prob_generating_block = config['PROB_GEN_BLOCK']
-    max_block_number = int(config['MAX_NUMBER_OF_BLOCKS'])
-    number_of_tx_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
-    nodeDrift = int(nodeCycle * float(config['NODE_DRIFT']))
 
-    max_block_size = int(config['MAX_BLOCK_SIZE'])
-    min_tx_size = int(config['MIN_TX_SIZE'])
-    max_tx_size = int(config['MAX_TX_SIZE'])
+    if top_nodes != -1:
+        if top_nodes == 0:
+            hop_based_broadcast = False
+        else:
+            hop_based_broadcast = True
+        top_nodes_size = top_nodes
+    else:
+        top_nodes_size = int(config['TOP_NODES_SIZE'])
+        hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
+
     number_of_miners = int(config['NUMBER_OF_MINERS'])
     extra_replicas = int(config['EXTRA_REPLICAS'])
-    top_nodes_size = int(config['TOP_NODES_SIZE'])
 
-    latencyTablePath = config['LATENCY_TABLE']
-    latencyValue = None
+    nb_cycles = config['NUMBER_OF_CYCLES']
+    max_block_size = int(config['MAX_BLOCK_SIZE'])
 
-    f = open("logs/blocksReceived.txt", "w")
-    f.close()
-    f = open("logs/missingTxs.txt", "w")
-    f.close()
+    number_of_tx_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
+    min_tx_size = int(config['MIN_TX_SIZE'])
+    max_tx_size = int(config['MAX_TX_SIZE'])
+    tx_generated = [0] * nb_cycles
 
-    tx_gened = [0] * nbCycles
+    block_id = 0
+    tx_id = 0
 
     values = []
     i = -1
@@ -908,6 +1071,24 @@ def configure(config):
         i += 1
         j -= 1
 
+    create_network(create_new, save_network_connections, neighbourhood_size, file_name)
+
+    if number_of_tx_to_gen_per_cycle//nb_nodes == 0:
+        nodes_to_gen_tx = []
+        for i in range(0, nb_cycles):
+            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes), number_of_tx_to_gen_per_cycle))
+
+    IS_CHURN = config.get('CHURN', False)
+    if IS_CHURN:
+        CHURN_RATE = config.get('CHURN_RATE', 0.)
+    MESSAGE_LOSS = float(config.get('MESSASE_LOSS', 0))
+    if MESSAGE_LOSS > 0:
+        sim.setMessageLoss(MESSAGE_LOSS)
+
+    nodeDrift = int(nb_cycles * float(config['NODE_DRIFT']))
+    latencyTablePath = config['LATENCY_TABLE']
+    latencyValue = None
+
     try:
         with open(latencyTablePath, 'r') as f:
             latencyTable = cPickle.load(f)
@@ -916,41 +1097,10 @@ def configure(config):
         latencyValue = int(latencyTablePath)
         logger.warn('Using constant latency value: {}'.format(latencyValue))
 
-    latencyTable = utils.check_latency_nodes(latencyTable, nbNodes, latencyValue)
+    latencyTable = utils.check_latency_nodes(latencyTable, nb_nodes, latencyValue)
     latencyDrift = eval(config['LATENCY_DRIFT'])
 
-    block_id = 0
-    tx_id = 0
-    nodeState = defaultdict()
-    for n in xrange(nbNodes):
-        neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
-        while neighbourhood.__contains__(n):
-            neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
-        nodeState[n] = createNode(neighbourhood)
-
-    miners = random.sample(xrange(nbNodes), number_of_miners)
-
-    if extra_replicas > 0:
-        i = 0
-        miners_to_add = []
-        for n in xrange(nbNodes, nbNodes + (extra_replicas * number_of_miners)):
-            neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
-            while neighbourhood.__contains__(n) or neighbourhood.__contains__(miners[i]):
-                neighbourhood = random.sample(xrange(nbNodes), neighbourhood_size)
-            neighbourhood.append(miners[i])
-            nodeState[n] = createNode(neighbourhood)
-            miners_to_add.append(n)
-            i += 1
-        miners.append(miners_to_add)
-
-        nbNodes = nbNodes + (extra_replicas * number_of_miners)
-
-    if number_of_tx_to_gen_per_cycle//nbNodes == 0:
-        nodes_to_gen_tx = []
-        for i in range(0, nbCycles):
-            nodes_to_gen_tx.append(random.sample(xrange(nbNodes), number_of_tx_to_gen_per_cycle))
-
-    sim.init(nodeCycle, nodeDrift, latencyTable, latencyDrift)
+    sim.init(node_cycle, nodeDrift, latencyTable, latencyDrift)
 
 
 if __name__ == '__main__':
@@ -969,17 +1119,40 @@ if __name__ == '__main__':
         logger.error("Invocation: ./echo.py <conf_file> <run_id>")
         sys.exit()
 
-    if LOG_TO_FILE:
-        if not os.path.exists("logs/"):
-            os.makedirs("logs/")
-            # logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG, filename='logs/echo.log', filemode='w')
+    if not os.path.exists("out/"):
+        os.makedirs("out/")
+
     dumpPath = sys.argv[1]
     confFile = dumpPath + '/conf.yaml'
     runId = int(sys.argv[2])
     f = open(confFile)
-    console_nb_of_nodes = 0
-    if len(sys.argv) == 4:
-        console_nb_of_nodes = int(sys.argv[3])
+
+    top_nodes = -1
+    create_new = True
+    save_network_connections = False
+    file_name = ""
+    results_name = "results"
+    if len(sys.argv) > 3:
+        i = 3
+        while i < len(sys.argv):
+            if sys.argv[i] == "-cn":
+                create_new = bool(sys.argv[i+1])
+            elif sys.argv[i] == "-sn":
+                save_network_connections = bool(sys.argv[i+1])
+            elif sys.argv[i] == "-tn":
+                top_nodes = int(sys.argv[i+1])
+            elif sys.argv[i] == "-ln":
+                create_new = False
+                save_network_connections = False
+                file_name = sys.argv[i+1]
+            elif sys.argv[i] == "-rn":
+                results_name = sys.argv[i+1]
+            else:
+                raise ValueError("Input {} is invalid".format(sys.argv[i]))
+            i += 2
+
+    if not create_new and file_name == "":
+        raise ValueError("Invalid combination of inputs create_new and file_name")
 
     # load configuration file
     configure(yaml.load(f))
