@@ -37,13 +37,14 @@ TOP_N_NODES, STATS = 0, 1
 
 TOTAL_TLL, TOTAL_MSG_RECEIVED = 0, 1
 
-INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG, MISSING_TX \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG, MISSING_TX, \
+    ALL_INVS = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 SENT, RECEIVED = 0, 1
 
 BLOCK_TYPE, TX_TYPE = True, False
 
+RECEIVED_INV, RELEVANT_INV = 0, 1
 
 def init():
     # schedule execution for all nodes
@@ -117,11 +118,13 @@ def INV(myself, source, vInv):
     headers_to_request = []
     for inv in vInv:
         if inv[INV_TYPE] == TX_TYPE:
+            nodeState[myself][MSGS][ALL_INVS][RECEIVED_INV] += 1
             update_neighbourhood_inv(myself, source, TX_TYPE, inv[INV_CONTENT_ID])
             seen_tx = have_it(myself, TX_TYPE, inv[INV_CONTENT_ID])
             if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].add(inv[INV_CONTENT_ID])
+                nodeState[myself][MSGS][ALL_INVS][RELEVANT_INV] += 1
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
             update_neighbourhood_inv(myself, source, BLOCK_TYPE, inv[INV_CONTENT_ID])
@@ -874,6 +877,18 @@ def get_avg_tx_per_block():
 
     return total_num_if_tx/block_id
 
+
+def get_avg_total_sent_msg():
+    total_sent = [0] * nb_nodes
+    for node in xrange(nb_nodes):
+        for i in range(INV_MSG, MISSING_TX):
+            total_sent[node] += nodeState[node][MSGS][i][SENT]
+
+    total_sent = sum(total_sent)
+
+    return total_sent/nb_nodes
+
+
 def wrapup():
     global nodeState
     logger.info("Wrapping up")
@@ -889,6 +904,8 @@ def wrapup():
     blocktx_messages = map(lambda x: nodeState[x][MSGS][BLOCKTXN_MSG], nodeState)
     tx_messages = map(lambda x: nodeState[x][MSGS][TX_MSG], nodeState)
     missing_tx = map(lambda x: nodeState[x][MSGS][MISSING_TX], nodeState)
+    all_inv = map(lambda x: nodeState[x][MSGS][ALL_INVS][RECEIVED_INV], nodeState)
+    relevant_inv = map(lambda x: nodeState[x][MSGS][ALL_INVS][RELEVANT_INV], nodeState)
 
     sum_received_blocks = map(lambda x: nodeState[x][NODE_RECEIVED_BLOCKS], nodeState)
     receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
@@ -910,18 +927,25 @@ def wrapup():
     sum_tx = 0
     sum_getBlockTX = 0
     sum_missingTX = 0
-
+    sum_all_inv = 0
+    sum_relevant_inv = 0
     for i in range(0, nb_nodes):
         sum_inv += inv_messages[i][SENT]
         sum_getData += getdata_messages[i][SENT]
         sum_tx += tx_messages[i][SENT]
         sum_getBlockTX += getblocktx_messages[i][SENT]
         sum_missingTX += missing_tx[i]
+        sum_all_inv += all_inv[i]
+        sum_relevant_inv += relevant_inv[i]
 
     avg_block_diss = avg_block_dissemination()
     nb_forks = fork_rate()
     hops_distribution = get_miner_hops()
     avg_tx_per_block = get_avg_tx_per_block()
+    avg_total_sent_msg = get_avg_total_sent_msg()
+    inv_per_node_sent = sum_all_inv / nb_nodes
+    unique_inv_per_node_received = sum_relevant_inv/nb_nodes
+    irrelevant_inv_in_per = inv_per_node_sent/unique_inv_per_node_received
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
@@ -930,18 +954,21 @@ def wrapup():
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
         spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx",
-                              "Avg numb of tx per block", "Avg block dissemination", "Total number of branches", "Hops distribution"])
+                              "Avg numb of tx per block", "Avg irrelevant invs", "Avg irrelevant invs in %",
+                              "Avg total sent messages", "Avg block dissemination", "Total number of branches",
+                              "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
         spam_writer.writerow(["False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
-                              sum_missingTX / nb_nodes, avg_tx_per_block, avg_block_diss, nb_forks,
-                              ''.join(str(e) + " " for e in hops_distribution)])
+                              sum_missingTX / nb_nodes, avg_tx_per_block, irrelevant_inv_in_per,
+                              avg_total_sent_msg, avg_block_diss, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
         spam_writer.writerow([top_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
-                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block, avg_block_diss, nb_forks,
+                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
+                              irrelevant_inv_in_per, avg_total_sent_msg, avg_block_diss, nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
 
 
@@ -1004,7 +1031,7 @@ def createNode(neighbourhood):
         stats[neighbour] = [0, 0]
     node_neighbourhood_stats = [topx, stats]
 
-    msgs = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], 0]
+    msgs = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], 0, [0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_received_blocks, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
