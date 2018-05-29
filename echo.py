@@ -5,6 +5,7 @@ from __future__ import division
 
 import ast
 import csv
+import datetime
 import time
 from collections import defaultdict
 import math
@@ -64,7 +65,8 @@ def CYCLE(myself):
 
     # show progress for one node
     if myself == 0:
-        logger.info('cycle {}'.format(nodeState[myself][CURRENT_CYCLE]))
+        value = datetime.datetime.fromtimestamp(time.time())
+        print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
 
     # If a node can generate transactions
     i = 0
@@ -705,8 +707,8 @@ def process_new_headers(myself, source, headers):
 
         if parent_block is None and header[HEADER_PARENT_ID] != -1:
             # TODO REFACTOR
-            logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!"
-                        .format(myself, header[HEADER_PARENT_ID]))
+            #logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!"
+            #            .format(myself, header[HEADER_PARENT_ID]))
             headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
             sim.send(GETHEADERS, source, myself, headers_to_request)
             nodeState[myself][MSGS][GETHEADERS_MSG] += 1
@@ -880,7 +882,7 @@ def get_avg_total_sent_msg():
 
 def wrapup():
     global nodeState
-    logger.info("Wrapping up")
+    #logger.info("Wrapping up")
     #logger.info(nodeState)
 
     inv_messages = map(lambda x: nodeState[x][MSGS][INV_MSG], nodeState)

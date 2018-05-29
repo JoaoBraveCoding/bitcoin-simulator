@@ -1,9 +1,9 @@
 # system settings, mandatory
-NUMBER_OF_NODES : 200
+NUMBER_OF_NODES : 6000
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
-NUMBER_OF_CYCLES : 60
+NUMBER_OF_CYCLES : 720
 # duration of node cycle
 NODE_CYCLE: 12500
 # node cycle drift, zero means perfect clocks 
@@ -43,8 +43,8 @@ MAX_TX_SIZE: 1498
 MAX_BLOCK_SIZE: 1000000
 
 NUMBER_OF_MINERS: 16
-EXTRA_REPLICAS: 1
+EXTRA_REPLICAS: 3
 
-HOP_BASED_BROADCAST: True
+HOP_BASED_BROADCAST: False
 TOP_NODES_SIZE: 2
 
