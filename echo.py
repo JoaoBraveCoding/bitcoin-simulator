@@ -857,6 +857,23 @@ def count_hops(to_call, called, seen, depth):
     return count_hops(to_call, called, seen, depth + 1)
 
 
+def get_avg_tx_per_block():
+    all_blocks = list(xrange(block_id))
+
+    total_num_if_tx = 0
+    for node in xrange(nb_nodes):
+        for block in nodeState[node][NODE_RECEIVED_BLOCKS]:
+            if block[BLOCK_ID] in all_blocks:
+                all_blocks.remove(block[BLOCK_ID])
+                total_num_if_tx += len(block[BLOCK_TX])
+
+            if len(all_blocks) == 0:
+                break
+        if len(all_blocks) == 0:
+            break
+
+    return total_num_if_tx/block_id
+
 def wrapup():
     global nodeState
     logger.info("Wrapping up")
@@ -901,10 +918,10 @@ def wrapup():
         sum_getBlockTX += getblocktx_messages[i][SENT]
         sum_missingTX += missing_tx[i]
 
-
     avg_block_diss = avg_block_dissemination()
     nb_forks = fork_rate()
     hops_distribution = get_miner_hops()
+    avg_tx_per_block = get_avg_tx_per_block()
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
@@ -913,17 +930,18 @@ def wrapup():
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
         spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx",
-                              "Avg block dissemination", "Total number of branches" "Hops distribution"])
+                              "Avg numb of tx per block", "Avg block dissemination", "Total number of branches", "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
         spam_writer.writerow(["False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
-                              sum_missingTX / nb_nodes, avg_block_diss, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
+                              sum_missingTX / nb_nodes, avg_tx_per_block, avg_block_diss, nb_forks,
+                              ''.join(str(e) + " " for e in hops_distribution)])
     else:
         spam_writer.writerow([top_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
-                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_block_diss, nb_forks,
+                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block, avg_block_diss, nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
 
 
