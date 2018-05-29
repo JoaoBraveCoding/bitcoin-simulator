@@ -26,9 +26,9 @@ TX_ID, TX_CONTENT, TX_SIZE = 0, 1, 2
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID = 0, 1
 
-CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_RECEIVED_BLOCKS, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, \
+CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, \
     NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, \
-    NODE_NEIGHBOURHOOD_STATS, MSGS = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+    NODE_NEIGHBOURHOOD_STATS, MSGS, NODE_HEADERS_TO_REQUEST = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
@@ -44,6 +44,7 @@ INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GE
 BLOCK_TYPE, TX_TYPE = True, False
 
 RECEIVED_INV, RELEVANT_INV = 0, 1
+
 
 def init():
     # schedule execution for all nodes
@@ -66,6 +67,7 @@ def CYCLE(myself):
     # show progress for one node
     if myself == 0:
         value = datetime.datetime.fromtimestamp(time.time())
+        #output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
         print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
 
     # If a node can generate transactions
@@ -129,7 +131,8 @@ def INV(myself, source, vInv):
             update_neighbourhood_inv(myself, source, BLOCK_TYPE, inv[INV_CONTENT_ID])
             seen_block = have_it(myself, BLOCK_TYPE, inv[INV_CONTENT_ID])
             if not seen_block:
-                headers_to_request.append(inv[INV_CONTENT_ID])
+                if get_header(myself, inv[INV_CONTENT_ID]) is None:
+                    headers_to_request.append(inv[INV_CONTENT_ID])
 
         else:
             # logger.info("Node {} Received INV from {} with invalid inv type {}".format(myself, source, inv))
@@ -153,7 +156,7 @@ def GETHEADERS(myself, source, get_headers):
 
     headers_to_send = []
     for id in get_headers:
-        block = get_block(myself, id)
+        block = get_block(id)
         if block is not None:
             headers_to_send.append(get_block_header(block))
         else:
@@ -201,7 +204,7 @@ def GETDATA(myself, source, requesting_data):
                 update_neighbourhood_inv(myself, source, TX_TYPE, tx[TX_ID])
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
-            block = get_block(myself, inv[INV_CONTENT_ID])
+            block = get_block(inv[INV_CONTENT_ID])
             if block is not None:
                 if block[BLOCK_GEN_NODE] != myself:
                     block = inc_tll(block)
@@ -226,6 +229,10 @@ def BLOCK(myself, source, block):
 
     if block[BLOCK_ID] in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
         nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].remove(block[BLOCK_ID])
+
+    if block[BLOCK_ID] in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
+        nodeState[myself][NODE_HEADERS_TO_REQUEST].remove(block[BLOCK_ID])
+
 
     process_block(myself, source, block)
 
@@ -277,7 +284,7 @@ def GETBLOCKTXN(myself, source, tx_request):
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
-    block = get_block(myself, tx_request[0])
+    block = get_block(tx_request[0])
     tx_to_send = []
     for tx in block[BLOCK_TX]:
         if tx[TX_ID] in tx_request[1]:
@@ -344,7 +351,7 @@ def next_t_to_gen(myself):
 
 
 def generate_new_block(myself):
-    global nodeState, block_id
+    global nodeState, block_id, blocks_created
 
     # First block or
     # Not first block which means getting highest block to be the parent
@@ -357,7 +364,7 @@ def generate_new_block(myself):
                      myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
 
     # Store the new block
-    nodeState[myself][NODE_RECEIVED_BLOCKS].append(new_block)
+    blocks_created.append(new_block)
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].add(new_block[BLOCK_ID])
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block
     block_id += 1
@@ -370,14 +377,8 @@ def inc_tll(block):
     return tuple(lst)
 
 
-def inc_ts(block, cycle):
-    lst = list(block)
-    lst[BLOCK_RECEIVED_TS] = cycle
-    return tuple(lst)
-
-
-def get_block(myself, block_id):
-    for item in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
+def get_block(block_id):
+    for item in reversed(blocks_created):
         if item[0] == block_id:
             return item
     return None
@@ -422,30 +423,28 @@ def process_block(myself, source, block):
 
     # Check if it's a new block
     if not have_it(myself, BLOCK_TYPE, block[BLOCK_ID]):
-        block_to_save = inc_ts(block, nodeState[myself][CURRENT_CYCLE])
-        update_have_it(myself, BLOCK_TYPE, block_to_save[BLOCK_ID])
-        update_block(myself, block_to_save)
+        update_have_it(myself, BLOCK_TYPE, block[BLOCK_ID])
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
-                block_to_save[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
-            nodeState[myself][NODE_CURRENT_BLOCK] = block_to_save
+                block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
+            nodeState[myself][NODE_CURRENT_BLOCK] = block
         next_t_to_gen(myself)
 
         # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
-        update_tx(myself, block_to_save)
+        update_tx(myself, block)
 
         # Broadcast new block
-        update_neighbour_statistics(myself, source, block_to_save[BLOCK_TTL])
-        update_neighbourhood_inv(myself, source, BLOCK_TYPE, block_to_save[BLOCK_ID])
+        update_neighbour_statistics(myself, source, block[BLOCK_TTL])
+        update_neighbourhood_inv(myself, source, BLOCK_TYPE, block[BLOCK_ID])
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            if target == source or check_availability(myself, target, BLOCK_TYPE, block_to_save[BLOCK_ID]):
+            if target == source or check_availability(myself, target, BLOCK_TYPE, block[BLOCK_ID]):
                 continue
-            elif check_availability(myself, target, BLOCK_TYPE, block_to_save[BLOCK_PARENT_ID]):
-                block_to_send = inc_tll(block_to_save)
+            elif check_availability(myself, target, BLOCK_TYPE, block[BLOCK_PARENT_ID]):
+                block_to_send = inc_tll(block)
                 sim.send(CMPCTBLOCK, target, myself, cmpctblock(block_to_send))
                 nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
                 update_neighbourhood_inv(myself, target, BLOCK_TYPE, block_to_send[BLOCK_ID])
             else:
-                sim.send(HEADERS, target, myself, [get_block_header(block_to_save)])
+                sim.send(HEADERS, target, myself, [get_block_header(block)])
                 nodeState[myself][MSGS][HEADERS_MSG] += 1
 
     else:
@@ -465,24 +464,6 @@ def update_tx(myself, block):
 
         if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
-
-
-def update_block(myself, block):
-    global nodeState
-
-    if not nodeState[myself][NODE_RECEIVED_BLOCKS]:
-        nodeState[myself][NODE_RECEIVED_BLOCKS].append(block)
-        return
-
-    i = len(nodeState[myself][NODE_RECEIVED_BLOCKS]) - 1
-    while i >= 0:
-        if nodeState[myself][NODE_RECEIVED_BLOCKS][i][0] == block[0] and \
-                len(nodeState[myself][NODE_RECEIVED_BLOCKS][i]) < block:
-            nodeState[myself][NODE_RECEIVED_BLOCKS][i] = block
-            return
-        i = i - 1
-
-    nodeState[myself][NODE_RECEIVED_BLOCKS].append(block)
 
 
 def cmpctblock(block):
@@ -560,6 +541,14 @@ def update_have_it(myself, type, id):
     else:
         print("update_inv else condition reached with type: {} and id: {}".format(type, id))
         exit(-1)
+
+
+def get_header(myself, header_id):
+    for header in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
+        if header[BLOCK_ID] == header_id:
+            return header
+
+    return None
 
 
 # Neighbourhood update and check functions
@@ -700,12 +689,16 @@ def process_new_headers(myself, source, headers):
     global nodeState
 
     for header in headers:
-        block = get_block(myself, header[HEADER_ID])
-        parent_block = get_block(myself, header[HEADER_PARENT_ID])
+        seen_block = have_it(myself, BLOCK_TYPE, header[HEADER_ID])
+        have_header = None
+        if not seen_block:
+            have_header = get_header(myself, header[HEADER_ID])
+
+        seen_parent = have_it(myself, BLOCK_TYPE, header[HEADER_PARENT_ID])
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, header[HEADER_ID])
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, header[HEADER_PARENT_ID])
 
-        if parent_block is None and header[HEADER_PARENT_ID] != -1:
+        if not seen_parent and header[HEADER_PARENT_ID] != -1:
             # TODO REFACTOR
             #logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!"
             #            .format(myself, header[HEADER_PARENT_ID]))
@@ -714,25 +707,19 @@ def process_new_headers(myself, source, headers):
             nodeState[myself][MSGS][GETHEADERS_MSG] += 1
             continue
 
-        elif (parent_block is not None or header[HEADER_PARENT_ID] == -1) and block is None:
-            nodeState[myself][NODE_RECEIVED_BLOCKS].append(header)
+        elif (seen_parent or header[HEADER_PARENT_ID] == -1) and (not seen_block and have_header is None):
+            nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header)
 
 
 def get_data_to_request(myself, source):
     global nodeState
 
     data_to_request = []
-    for block in reversed(nodeState[myself][NODE_RECEIVED_BLOCKS]):
-        if len(block) == 2 and check_availability(myself, source, BLOCK_TYPE, block[BLOCK_ID]) and \
-                block[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
-            data_to_request.append((BLOCK_TYPE, block[BLOCK_ID]))
-            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].add(block[BLOCK_ID])
-        elif len(block) == 2 or len(block) == 8:
-            continue
-        else:
-            # This condition shouldn't happen in a simulated scenario
-            raise ValueError("get_data_to_request, else, there are tuples in the NODE_RECEIVED_BLOCKS that do not have an "
-                             "expected size. This condition is not coded and shouldn't happen {}".format(block))
+    for header in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
+        if check_availability(myself, source, BLOCK_TYPE, header[BLOCK_ID]) and \
+                header[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
+            data_to_request.append((BLOCK_TYPE, header[BLOCK_ID]))
+            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].add(header[BLOCK_ID])
 
     return data_to_request
 
@@ -751,36 +738,11 @@ def new_connection(myself, source):
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
 
 
-def avg_block_dissemination():
-    dissemination_times = []
-    total_unseen_blocks = 0
-    for i in range(0, block_id):
-        block_creation_ts = -1
-        worst_ts = 0
-        for myself in range(0, nb_nodes):
-            block = get_block(myself, i)
-            if block is None:
-                total_unseen_blocks += 1
-                continue
-
-            if block_creation_ts == -1:
-                block_creation_ts = block[BLOCK_TIMESTAMP]
-                worst_ts = block[BLOCK_RECEIVED_TS]
-            elif worst_ts < block[BLOCK_RECEIVED_TS]:
-                worst_ts = block[BLOCK_RECEIVED_TS]
-        dissemination_times.append(worst_ts-block_creation_ts)
-
-    total = sum(dissemination_times)
-    print("Total unseen blocks {}".format(total_unseen_blocks))
-    return total/block_id
-
-
 def get_all_genesis():
     genesis = []
-    for myself in range(0, nb_nodes):
-        for block in nodeState[myself][NODE_RECEIVED_BLOCKS]:
-            if block[BLOCK_HEIGHT] == 0 and block[BLOCK_ID] not in genesis:
-                genesis.append(block[BLOCK_ID])
+    for block in blocks_created:
+        if block[BLOCK_HEIGHT] == 0 and block[BLOCK_ID] not in genesis:
+            genesis.append(block[BLOCK_ID])
     return genesis
 
 
@@ -794,15 +756,10 @@ def fork_rate():
         all_blocks.remove(current_block)
         found = False
 
-        for myself in range(0, nb_nodes):
-            for potential in all_blocks:
-                potential_block = get_block(myself, potential)
-                if potential_block is None:
-                    continue
-
-                if potential_block[BLOCK_PARENT_ID] == current_block and potential not in branches:
-                    found = True
-                    branches.append(potential)
+        for potential_block in blocks_created:
+            if potential_block[BLOCK_PARENT_ID] == current_block and potential_block[BLOCK_ID] not in branches:
+                found = True
+                branches.append(potential_block[BLOCK_ID])
 
         if len(all_blocks) == 0:
             break
@@ -852,19 +809,9 @@ def count_hops(to_call, called, seen, depth):
 
 
 def get_avg_tx_per_block():
-    all_blocks = list(xrange(block_id))
-
     total_num_if_tx = 0
-    for node in xrange(nb_nodes):
-        for block in nodeState[node][NODE_RECEIVED_BLOCKS]:
-            if block[BLOCK_ID] in all_blocks:
-                all_blocks.remove(block[BLOCK_ID])
-                total_num_if_tx += len(block[BLOCK_TX])
-
-            if len(all_blocks) == 0:
-                break
-        if len(all_blocks) == 0:
-            break
+    for block in blocks_created:
+        total_num_if_tx += len(block[BLOCK_TX])
 
     return total_num_if_tx/block_id
 
@@ -898,17 +845,15 @@ def wrapup():
     all_inv = map(lambda x: nodeState[x][MSGS][ALL_INVS][RECEIVED_INV], nodeState)
     relevant_inv = map(lambda x: nodeState[x][MSGS][ALL_INVS][RELEVANT_INV], nodeState)
 
-    sum_received_blocks = map(lambda x: nodeState[x][NODE_RECEIVED_BLOCKS], nodeState)
-    receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
-                                                  sum_received_blocks[x][y][2], sum_received_blocks[x][y][3],
-                                                  sum_received_blocks[x][y][4], sum_received_blocks[x][y][6]),
-                                       xrange(len(sum_received_blocks[x]))), nodeState)
-    sum_received_blocks = map(lambda x: map(lambda y: sum_received_blocks[x][y][0], xrange(len(sum_received_blocks[x]))), nodeState)
+    sum_received_blocks = map(lambda x: nodeState[x][NODE_INV][NODE_INV_RECEIVED_BLOCKS], nodeState)
+    #receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
+    #                                              sum_received_blocks[x][y][2], sum_received_blocks[x][y][3],
+    #                                              sum_received_blocks[x][y][4], sum_received_blocks[x][y][6]),
+    #                                   xrange(len(sum_received_blocks[x]))), nodeState)
 
     # dump data into gnuplot format
     utils.dump_as_gnu_plot([inv_messages, getheaders_messages, headers_messages, getdata_messages, block_messages,
-                         cmpctblock_messages, getblocktx_messages, blocktx_messages, tx_messages, sum_received_blocks,
-                         receivedBlocks],
+                         cmpctblock_messages, getblocktx_messages, blocktx_messages, tx_messages, sum_received_blocks],
                         dumpPath + '/messages-' + str(runId) + '.gpData',
                         ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
                          '           sum_received_blocks                    receivedBlocks'])
@@ -929,7 +874,7 @@ def wrapup():
         sum_all_inv += all_inv[i]
         sum_relevant_inv += relevant_inv[i]
 
-    avg_block_diss = avg_block_dissemination()
+    #avg_block_diss = avg_block_dissemination()
     nb_forks = fork_rate()
     hops_distribution = get_miner_hops()
     avg_tx_per_block = get_avg_tx_per_block()
@@ -945,8 +890,8 @@ def wrapup():
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
         spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx",
-                              "Avg numb of tx per block", "Avg irrelevant invs", "Avg irrelevant invs in %",
-                              "Avg total sent messages", "Avg block dissemination", "Total number of branches",
+                              "Avg numb of tx per block", "% of duplicates inv",
+                              "Avg total sent messages", "Total number of branches",
                               "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
@@ -955,11 +900,11 @@ def wrapup():
     if not hop_based_broadcast:
         spam_writer.writerow(["False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, irrelevant_inv_in_per,
-                              avg_total_sent_msg, avg_block_diss, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
+                              avg_total_sent_msg, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
         spam_writer.writerow([top_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
-                              irrelevant_inv_in_per, avg_total_sent_msg, avg_block_diss, nb_forks,
+                              irrelevant_inv_in_per, avg_total_sent_msg, nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
 
 
@@ -1008,7 +953,6 @@ def createNode(neighbourhood):
     current_cycle = 0
     node_current_block = None
     node_inv = [set(), set()]
-    node_received_blocks = []
     node_partial_blocks = []
     node_mempool = []
     node_blocks_already_requested = set()
@@ -1017,6 +961,7 @@ def createNode(neighbourhood):
     node_neighbourhood_inv = {}
     stats = {}
     topx = []
+    node_headers_requested = []
     for neighbour in neighbourhood:
         node_neighbourhood_inv[neighbour] = [set(), set(), set()]
         stats[neighbour] = [0, 0]
@@ -1024,9 +969,9 @@ def createNode(neighbourhood):
 
     msgs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0]]
 
-    return [current_cycle, node_current_block, node_inv, node_received_blocks, node_partial_blocks, node_mempool,
+    return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
-            node_neighbourhood_inv, node_neighbourhood_stats, msgs]
+            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested]
 
 
 def create_nodes_and_miners(neighbourhood_size):
@@ -1056,6 +1001,8 @@ def create_miner_replicas(neighbourhood_size):
             nodeState[n] = createNode(neighbourhood)
             miners_to_add.append(n)
             i += 1
+            if i == number_of_miners - 1:
+                i = 0
         miners = miners + miners_to_add
 
         nb_nodes = nb_nodes + (extra_replicas * number_of_miners)
@@ -1064,7 +1011,8 @@ def create_miner_replicas(neighbourhood_size):
 def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
-        top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas
+        top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created
+
 
     node_cycle = int(config['NODE_CYCLE'])
 
@@ -1093,6 +1041,7 @@ def configure(config):
     tx_generated = [0] * nb_cycles
 
     block_id = 0
+    blocks_created = []
     tx_id = 0
 
     values = []
@@ -1153,6 +1102,7 @@ if __name__ == '__main__':
 
     if not os.path.exists("out/"):
         os.makedirs("out/")
+    output = open("output.txt", 'a')
 
     dumpPath = sys.argv[1]
     confFile = dumpPath + '/conf.yaml'
@@ -1197,5 +1147,6 @@ if __name__ == '__main__':
     sim.run()
     logger.info('Run done')
     # finish simulation, compute stats
+    output.close()
     wrapup()
     logger.info("That's all folks!")
