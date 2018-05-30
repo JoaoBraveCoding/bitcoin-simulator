@@ -58,7 +58,7 @@ def init():
 
 
 def CYCLE(myself):
-    global nodeState
+    global nodeState, blocks_mined_by_randoms
 
     # with churn the node might be gone
     if myself not in nodeState:
@@ -83,7 +83,10 @@ def CYCLE(myself):
 
     if nodeState[myself][NODE_TIME_TO_GEN] == nodeState[myself][CURRENT_CYCLE]:
         next_t_to_gen(myself)
-        if myself in miners or (myself not in miners and random.random() < 0.052):
+        if myself in miners or (myself not in miners and random.random() < 0.01 and
+                                blocks_mined_by_randoms < total_blocks_mined_by_randoms):
+            if myself not in miners:
+                blocks_mined_by_randoms += 1
             new_block = generate_new_block(myself)
 
             # Check if can send as cmpct or send through inv
@@ -1011,7 +1014,8 @@ def create_miner_replicas(neighbourhood_size):
 def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
-        top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created
+        top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
+        total_blocks_mined_by_randoms
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1039,6 +1043,9 @@ def configure(config):
     min_tx_size = int(config['MIN_TX_SIZE'])
     max_tx_size = int(config['MAX_TX_SIZE'])
     tx_generated = [0] * nb_cycles
+    blocks_mined_by_randoms = 0
+    total_blocks_mined_by_randoms = (nb_cycles/10) * 0.052
+
 
     block_id = 0
     blocks_created = []
