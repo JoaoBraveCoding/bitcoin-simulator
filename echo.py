@@ -63,7 +63,7 @@ def improve_performance(cycle):
         return
 
     for i in xrange(len(blocks_created)):
-        if blocks_created[i][BLOCK_HEIGHT] + 3 < highest_block:
+        if blocks_created[i][BLOCK_HEIGHT] + 3 < highest_block and len(blocks_created[i][BLOCK_TX]) != 1:
             for tx in blocks_created[i][BLOCK_TX]:
                 for myself in xrange(nb_nodes):
                     if tx in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
