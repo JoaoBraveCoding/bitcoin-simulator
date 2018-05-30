@@ -1,11 +1,11 @@
 # system settings, mandatory
-NUMBER_OF_NODES : 500
+NUMBER_OF_NODES : 200
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
 NUMBER_OF_CYCLES : 60
 # duration of node cycle
-NODE_CYCLE: 1250
+NODE_CYCLE: 125
 # node cycle drift, zero means perfect clocks 
 
 HOP_BASED_BROADCAST: True
