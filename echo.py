@@ -21,6 +21,7 @@ from sim import sim
 import utils
 from sortedList import SortedCollection
 
+
 BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS, BLOCK_EXTRA_TX \
     = 0, 1, 2, 3, 4, 5, 6, 7, 8
 
@@ -67,13 +68,13 @@ def improve_performance(cycle):
             for tx in blocks_created[i][BLOCK_TX]:
                 for myself in xrange(nb_nodes):
                     if tx in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
-                        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].remove(tx)
+                        del nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][tx]
 
                     for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX]:
-                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx)
+                            del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX][tx]
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
-                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx)
+                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND].remove(tx)
             replace_block = list(blocks_created[i])
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
             blocks_created[i] = tuple(replace_block)
@@ -280,7 +281,7 @@ def CMPCTBLOCK(myself, source, cmpctblock):
     if cmpctblock[BLOCK_EXTRA_TX]:
         for tx in cmpctblock[BLOCK_EXTRA_TX]:
             if tx not in nodeState[myself][NODE_MEMPOOL]:
-                nodeState[myself][NODE_MEMPOOL].insert(tx)
+                nodeState[myself][NODE_MEMPOOL][tx] = None
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
 
@@ -358,7 +359,7 @@ def TX(myself, source, tx):
     update_neighbourhood_inv(myself, source, TX_TYPE, tx)
     if not have_it(myself, TX_TYPE, tx):
         update_have_it(myself, TX_TYPE, tx)
-        nodeState[myself][NODE_MEMPOOL].insert(tx)
+        nodeState[myself][NODE_MEMPOOL][tx] = None
         push_to_send(myself, tx)
 
 
@@ -486,7 +487,7 @@ def update_tx(myself, block):
 
     for tx in block[BLOCK_TX]:
         if tx in nodeState[myself][NODE_MEMPOOL]:
-            nodeState[myself][NODE_MEMPOOL].remove(tx)
+            del nodeState[myself][NODE_MEMPOOL][tx]
 
         for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
             update_neighbourhood_inv(myself, neighbour, TX_TYPE, tx)
@@ -566,7 +567,7 @@ def update_have_it(myself, type, id):
     if type == BLOCK_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
         nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].insert(id)
     elif type == TX_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
-        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].insert(id)
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][id] = None
 
 
 def get_header(myself, header_id):
@@ -590,7 +591,7 @@ def update_neighbourhood_inv(myself, target, type, id):
             return
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS].insert(id)
     elif type == TX_TYPE and id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]:
-        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX].insert(id)
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX][id] = None
         if id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
             nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].remove(id)
 
@@ -622,8 +623,8 @@ def generate_new_tx(myself):
     global nodeState, tx_id
 
     new_tx = tx_id
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].insert(new_tx)
-    nodeState[myself][NODE_MEMPOOL].insert(new_tx)
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
+    nodeState[myself][NODE_MEMPOOL][new_tx] = None
     push_to_send(myself, new_tx)
 
     tx_id += 1
@@ -659,12 +660,12 @@ def get_tx_to_block(myself):
 
     size = 0
     tx_array = []
-    list_to_iter = list(nodeState[myself][NODE_MEMPOOL])
+    list_to_iter = dict(nodeState[myself][NODE_MEMPOOL])
     for tx in list_to_iter:
         if size + 700 <= max_block_size:
             size += 700
             tx_array.append(tx)
-            nodeState[myself][NODE_MEMPOOL].remove(tx)
+            del nodeState[myself][NODE_MEMPOOL][tx]
         elif size + min_tx_size > max_block_size:
             break
         else:
@@ -756,7 +757,7 @@ def new_connection(myself, source):
         return
     else:
         nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
-        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), SortedCollection(), []]
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), defaultdict(), []]
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
 
 
@@ -977,9 +978,9 @@ def create_network(create_new, save_network_connections, neighbourhood_size, fil
 def createNode(neighbourhood):
     current_cycle = 0
     node_current_block = None
-    node_inv = [SortedCollection(), SortedCollection()]
+    node_inv = [SortedCollection(), defaultdict()]
     node_partial_blocks = []
-    node_mempool = SortedCollection()
+    node_mempool = defaultdict()
     node_blocks_already_requested = []
     node_tx_already_requested = []
     node_time_to_gen = -1
@@ -988,7 +989,7 @@ def createNode(neighbourhood):
     topx = []
     node_headers_requested = []
     for neighbour in neighbourhood:
-        node_neighbourhood_inv[neighbour] = [SortedCollection(), SortedCollection(), []]
+        node_neighbourhood_inv[neighbour] = [SortedCollection(), defaultdict(), []]
         stats[neighbour] = [0, 0]
     node_neighbourhood_stats = [topx, stats]
 
