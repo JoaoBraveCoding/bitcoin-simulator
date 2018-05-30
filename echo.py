@@ -19,6 +19,7 @@ import logging
 import numpy
 from sim import sim
 import utils
+from sortedList import SortedCollection
 
 BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS, BLOCK_EXTRA_TX \
     = 0, 1, 2, 3, 4, 5, 6, 7, 8
@@ -57,6 +58,27 @@ def init():
     #    sim.scheduleExecutionFixed(MEASURE_X, nodeCycle * (c + 1))
 
 
+def improve_performance(cycle):
+    if cycle % 10 != 0 or cycle == 0:
+        return
+
+    for i in xrange(len(blocks_created)):
+        if blocks_created[i][BLOCK_HEIGHT] + 3 < highest_block:
+            for tx in blocks_created[i][BLOCK_TX]:
+                for myself in xrange(nb_nodes):
+                    if tx[TX_ID] in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
+                        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].remove(tx[TX_ID])
+
+                    for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
+                        if tx[TX_ID] in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX]:
+                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx[TX_ID])
+                        if tx[TX_ID] in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
+                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx[TX_ID])
+            replace_block = list(blocks_created[i])
+            replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
+            blocks_created[i] = tuple(replace_block)
+
+
 def CYCLE(myself):
     global nodeState, blocks_mined_by_randoms
 
@@ -66,8 +88,10 @@ def CYCLE(myself):
 
     # show progress for one node
     if myself == 0:
+        improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
         #output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        #output.flush()
         print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
 
     # If a node can generate transactions
@@ -127,7 +151,7 @@ def INV(myself, source, vInv):
             seen_tx = have_it(myself, TX_TYPE, inv[INV_CONTENT_ID])
             if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
-                nodeState[myself][NODE_TX_ALREADY_REQUESTED].add(inv[INV_CONTENT_ID])
+                nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
                 nodeState[myself][MSGS][ALL_INVS][RELEVANT_INV] += 1
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
@@ -354,7 +378,7 @@ def next_t_to_gen(myself):
 
 
 def generate_new_block(myself):
-    global nodeState, block_id, blocks_created
+    global nodeState, block_id, blocks_created, highest_block
 
     # First block or
     # Not first block which means getting highest block to be the parent
@@ -362,15 +386,17 @@ def generate_new_block(myself):
     if nodeState[myself][NODE_CURRENT_BLOCK] is None:
         new_block = (block_id, -1, 0, nodeState[myself][CURRENT_CYCLE], myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
     else:
-        highest_block = nodeState[myself][NODE_CURRENT_BLOCK]
-        new_block = (block_id, highest_block[BLOCK_ID], highest_block[BLOCK_HEIGHT] + 1, nodeState[myself][CURRENT_CYCLE],
+        highest_blocke = nodeState[myself][NODE_CURRENT_BLOCK]
+        new_block = (block_id, highest_blocke[BLOCK_ID], highest_blocke[BLOCK_HEIGHT] + 1, nodeState[myself][CURRENT_CYCLE],
                      myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
 
     # Store the new block
     blocks_created.append(new_block)
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].add(new_block[BLOCK_ID])
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].insert(new_block[BLOCK_ID])
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block
     block_id += 1
+    if new_block[BLOCK_HEIGHT] > highest_block:
+        highest_block = new_block[BLOCK_HEIGHT]
     return new_block
 
 
@@ -537,18 +563,15 @@ def update_have_it(myself, type, id):
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if type == BLOCK_TYPE:
-        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].add(id)
-    elif type == TX_TYPE:
-        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].add(id)
-    else:
-        print("update_inv else condition reached with type: {} and id: {}".format(type, id))
-        exit(-1)
+    if type == BLOCK_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].insert(id)
+    elif type == TX_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].insert(id)
 
 
 def get_header(myself, header_id):
     for header in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
-        if header[BLOCK_ID] == header_id:
+        if header == header_id:
             return header
 
     return None
@@ -562,17 +585,14 @@ def update_neighbourhood_inv(myself, target, type, id):
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if type == BLOCK_TYPE:
+    if type == BLOCK_TYPE and id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS]:
         if id == -1:
             return
-        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS].add(id)
-    elif type == TX_TYPE:
-        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX].add(id)
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS].insert(id)
+    elif type == TX_TYPE and id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]:
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX].insert(id)
         if id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
             nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].remove(id)
-    else:
-        print("update_inv else condition reached with type: {} and id: {}".format(type, id))
-        exit(-1)
 
 
 def check_availability(myself, target, type, id):
@@ -592,8 +612,9 @@ def push_to_send(myself, id):
     nodes_to_send = get_nodes_to_send(myself)
 
     for node in nodes_to_send:
-        if not check_availability(myself, node, TX_TYPE, id):
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].add(id)
+        if not check_availability(myself, node, TX_TYPE, id) and \
+                id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND]:
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].append(id)
 # -----------------------
 
 
@@ -601,7 +622,7 @@ def generate_new_tx(myself):
     global nodeState, tx_id
 
     new_tx = (tx_id, random.randint(0, 100), 700)
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].add(new_tx[TX_ID])
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].insert(new_tx[TX_ID])
     nodeState[myself][NODE_MEMPOOL].append(new_tx)
     push_to_send(myself, new_tx[TX_ID])
 
@@ -664,7 +685,7 @@ def broadcast_invs(myself):
                     inv_to_send.append((TX_TYPE, tx))
             sim.send(INV, target, myself, inv_to_send)
             nodeState[myself][MSGS][INV_MSG] += 1
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].clear()
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND] = []
 
 
 def get_nodes_to_send(myself):
@@ -711,18 +732,18 @@ def process_new_headers(myself, source, headers):
             continue
 
         elif (seen_parent or header[HEADER_PARENT_ID] == -1) and (not seen_block and have_header is None):
-            nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header)
+            nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header[HEADER_ID])
 
 
 def get_data_to_request(myself, source):
     global nodeState
 
     data_to_request = []
-    for header in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
-        if check_availability(myself, source, BLOCK_TYPE, header[BLOCK_ID]) and \
-                header[BLOCK_ID] not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
-            data_to_request.append((BLOCK_TYPE, header[BLOCK_ID]))
-            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].add(header[BLOCK_ID])
+    for header_id in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
+        if check_availability(myself, source, BLOCK_TYPE, header_id) and \
+                header_id not in nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED]:
+            data_to_request.append((BLOCK_TYPE, header_id))
+            nodeState[myself][NODE_BLOCKS_ALREADY_REQUESTED].append(header_id)
 
     return data_to_request
 
@@ -737,7 +758,7 @@ def new_connection(myself, source):
         return
     else:
         nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
-        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [set(), set(), set()]
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), SortedCollection(), []]
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
 
 
@@ -814,7 +835,10 @@ def count_hops(to_call, called, seen, depth):
 def get_avg_tx_per_block():
     total_num_if_tx = 0
     for block in blocks_created:
-        total_num_if_tx += len(block[BLOCK_TX])
+        if isinstance(block[BLOCK_TX], int):
+            total_num_if_tx += block[BLOCK_TX]
+        else:
+            total_num_if_tx += len(block[BLOCK_TX])
 
     return total_num_if_tx/block_id
 
@@ -955,18 +979,18 @@ def create_network(create_new, save_network_connections, neighbourhood_size, fil
 def createNode(neighbourhood):
     current_cycle = 0
     node_current_block = None
-    node_inv = [set(), set()]
+    node_inv = [SortedCollection(), SortedCollection()]
     node_partial_blocks = []
     node_mempool = []
-    node_blocks_already_requested = set()
-    node_tx_already_requested = set()
+    node_blocks_already_requested = []
+    node_tx_already_requested = []
     node_time_to_gen = -1
     node_neighbourhood_inv = {}
     stats = {}
     topx = []
     node_headers_requested = []
     for neighbour in neighbourhood:
-        node_neighbourhood_inv[neighbour] = [set(), set(), set()]
+        node_neighbourhood_inv[neighbour] = [SortedCollection(), SortedCollection(), []]
         stats[neighbour] = [0, 0]
     node_neighbourhood_stats = [topx, stats]
 
@@ -1015,7 +1039,7 @@ def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
-        total_blocks_mined_by_randoms
+        total_blocks_mined_by_randoms, highest_block
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1049,6 +1073,7 @@ def configure(config):
 
     block_id = 0
     blocks_created = []
+    highest_block = -1
     tx_id = 0
 
     values = []
