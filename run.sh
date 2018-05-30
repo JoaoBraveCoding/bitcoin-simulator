@@ -1,10 +1,11 @@
 # To be able to run this script run:
 # chmod 755 run.sh
-# run 
+# run
 runId=1
 cycles=0
 tpNodes=0
 i=0
+filename=250-2-0
 
 if [ -z "$1" ]
 then
@@ -14,7 +15,7 @@ fi
 
 
 cycles=$1
-((cycles=cycles*5-1))
+((cycles=cycles*3-1))
 while [ "$i" -le "$cycles" ]
 do
   if [ "$tpNodes" -eq "0" ]
@@ -25,25 +26,20 @@ do
       then
         pypy echo.py conf_echo/ 1 -sn True -tn $tpNodes
       else
-        pypy echo.py conf_echo/ $runId -ln 216-16-1 -tn $tpNodes
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tpNodes
       fi
     else
-      pypy echo.py conf_echo/ $runId -ln 216-16-1 -tn $tpNodes
+      pypy echo.py conf_echo/ $runId -ln $filename -tn $tpNodes
     fi
   else
-    pypy echo.py conf_echo/ $runId -ln 216-16-1 -tn $tpNodes
+    pypy echo.py conf_echo/ $runId -ln $filename -tn $tpNodes
   fi
 
   (( runId=runId+1 ))
   (( i=i+1))
   (( tpNodes=tpNodes-1))
-  if [ "$tpNodes" -eq "1" ]
+  if [ "$tpNodes" -eq "-1" ]
   then
-    ((tpNodes=0))
-  fi
-  
-  if [ "$tpNodes" -eq "-1" ] 
-  then
-    ((tpNodes=5))
+    ((tpNodes=2))
   fi
 done
