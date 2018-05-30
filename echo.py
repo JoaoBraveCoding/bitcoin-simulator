@@ -366,9 +366,11 @@ def TX(myself, source, tx):
 def next_t_to_gen(myself):
     global nodeState
 
-    y = numpy.random.normal(0.5, 0.13)
+    y = numpy.random.normal(0.60, 0.11)
     if y > 1:
         x = - 10 * numpy.log(1-0.99)
+    elif y < 0:
+        x = - 10 * numpy.log(1-0.01)
     else:
         x = - 10 * numpy.log(1-y)
 
@@ -691,19 +693,21 @@ def get_nodes_to_send(myself):
     if not hop_based_broadcast or not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return nodeState[myself][NODE_NEIGHBOURHOOD]
 
-    total = top_nodes_size * 2
+    total = top_nodes_size + random_nodes_size
     top_nodes = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]
     if len(nodeState[myself][NODE_NEIGHBOURHOOD]) < total:
         total = len(nodeState[myself][NODE_NEIGHBOURHOOD]) - len(top_nodes)
     else:
         total = total - len(top_nodes)
 
-    collection_of_neighbours = list(nodeState[myself][NODE_NEIGHBOURHOOD])
-    for node in top_nodes:
-        if node in collection_of_neighbours:
-            collection_of_neighbours.remove(node)
+    random_nodes = []
+    if total > 0:
+        collection_of_neighbours = list(nodeState[myself][NODE_NEIGHBOURHOOD])
+        for node in top_nodes:
+            if node in collection_of_neighbours:
+                collection_of_neighbours.remove(node)
 
-    random_nodes = random.sample(collection_of_neighbours, total)
+        random_nodes = random.sample(collection_of_neighbours, total)
 
     return top_nodes + random_nodes
 
@@ -1038,7 +1042,7 @@ def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
-        total_blocks_mined_by_randoms, highest_block
+        total_blocks_mined_by_randoms, highest_block, random_nodes_size
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1052,6 +1056,10 @@ def configure(config):
         else:
             hop_based_broadcast = True
         top_nodes_size = top_nodes
+        if random_nodes != -1:
+            random_nodes_size = random_nodes
+        else:
+            random_nodes_size = top_nodes
     else:
         top_nodes_size = int(config['TOP_NODES_SIZE'])
         hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
@@ -1141,6 +1149,7 @@ if __name__ == '__main__':
     f = open(confFile)
 
     top_nodes = -1
+    random_nodes = -1
     create_new = True
     save_network_connections = False
     file_name = ""
@@ -1154,6 +1163,8 @@ if __name__ == '__main__':
                 save_network_connections = bool(sys.argv[i+1])
             elif sys.argv[i] == "-tn":
                 top_nodes = int(sys.argv[i+1])
+            elif sys.argv[i] == "-rn":
+                random_nodes = int(sys.argv[i+1])
             elif sys.argv[i] == "-ln":
                 create_new = False
                 save_network_connections = False
