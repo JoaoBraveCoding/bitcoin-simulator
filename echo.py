@@ -74,7 +74,7 @@ def improve_performance(cycle):
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX]:
                             del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX][tx]
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
-                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND].remove(tx)
+                            del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND][tx]
             replace_block = list(blocks_created[i])
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
             blocks_created[i] = tuple(replace_block)
@@ -91,9 +91,9 @@ def CYCLE(myself):
     if myself == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        #output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
-        #output.flush()
-        print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        output.flush()
+        #print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
 
     # If a node can generate transactions
     i = 0
@@ -593,7 +593,7 @@ def update_neighbourhood_inv(myself, target, type, id):
     elif type == TX_TYPE and id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]:
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX][id] = None
         if id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND].remove(id)
+            del nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND][id]
 
 
 def check_availability(myself, target, type, id):
@@ -615,7 +615,7 @@ def push_to_send(myself, id):
     for node in nodes_to_send:
         if not check_availability(myself, node, TX_TYPE, id) and \
                 id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND]:
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND].append(id)
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND][id] = None
 # -----------------------
 
 
@@ -684,7 +684,7 @@ def broadcast_invs(myself):
                     inv_to_send.append((TX_TYPE, tx))
             sim.send(INV, target, myself, inv_to_send)
             nodeState[myself][MSGS][INV_MSG] += 1
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND] = []
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND] = defaultdict()
 
 
 def get_nodes_to_send(myself):
@@ -757,7 +757,7 @@ def new_connection(myself, source):
         return
     else:
         nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
-        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), defaultdict(), []]
+        nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), defaultdict(), defaultdict()]
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
 
 
@@ -989,7 +989,7 @@ def createNode(neighbourhood):
     topx = []
     node_headers_requested = []
     for neighbour in neighbourhood:
-        node_neighbourhood_inv[neighbour] = [SortedCollection(), defaultdict(), []]
+        node_neighbourhood_inv[neighbour] = [SortedCollection(), defaultdict(), defaultdict()]
         stats[neighbour] = [0, 0]
     node_neighbourhood_stats = [topx, stats]
 
