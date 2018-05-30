@@ -23,7 +23,7 @@ from sortedList import SortedCollection
 
 BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS, BLOCK_EXTRA_TX \
     = 0, 1, 2, 3, 4, 5, 6, 7, 8
-TX_ID, TX_CONTENT, TX_SIZE = 0, 1, 2
+
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID = 0, 1
 
@@ -66,14 +66,14 @@ def improve_performance(cycle):
         if blocks_created[i][BLOCK_HEIGHT] + 3 < highest_block:
             for tx in blocks_created[i][BLOCK_TX]:
                 for myself in xrange(nb_nodes):
-                    if tx[TX_ID] in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
-                        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].remove(tx[TX_ID])
+                    if tx in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
+                        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].remove(tx)
 
                     for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
-                        if tx[TX_ID] in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX]:
-                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx[TX_ID])
-                        if tx[TX_ID] in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
-                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx[TX_ID])
+                        if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX]:
+                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx)
+                        if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
+                            nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX].remove(tx)
             replace_block = list(blocks_created[i])
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
             blocks_created[i] = tuple(replace_block)
@@ -228,7 +228,7 @@ def GETDATA(myself, source, requesting_data):
             if tx is not None:
                 sim.send(TX, source, myself, tx)
                 nodeState[myself][MSGS][TX_MSG] += 1
-                update_neighbourhood_inv(myself, source, TX_TYPE, tx[TX_ID])
+                update_neighbourhood_inv(myself, source, TX_TYPE, tx)
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
             block = get_block(inv[INV_CONTENT_ID])
@@ -280,8 +280,8 @@ def CMPCTBLOCK(myself, source, cmpctblock):
     if cmpctblock[BLOCK_EXTRA_TX]:
         for tx in cmpctblock[BLOCK_EXTRA_TX]:
             if tx not in nodeState[myself][NODE_MEMPOOL]:
-                nodeState[myself][NODE_MEMPOOL].append(tx)
-                nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
+                nodeState[myself][NODE_MEMPOOL].insert(tx)
+                nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
 
     # Check if we have all tx
@@ -314,7 +314,7 @@ def GETBLOCKTXN(myself, source, tx_request):
     block = get_block(tx_request[0])
     tx_to_send = []
     for tx in block[BLOCK_TX]:
-        if tx[TX_ID] in tx_request[1]:
+        if tx in tx_request[1]:
             tx_to_send.append(tx)
 
     if len(tx_to_send) != len(tx_request[1]):
@@ -339,8 +339,8 @@ def BLOCKTXN(myself, source, tx_requested):
         return
 
     for tx in tx_requested[1]:
-        if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
-            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
+        if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
     process_block(myself, source, build_cmpctblock(myself, tx_requested))
 
@@ -352,14 +352,14 @@ def TX(myself, source, tx):
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
-    if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
-        nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
+    if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+        nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
-    update_neighbourhood_inv(myself, source, TX_TYPE, tx[TX_ID])
-    if not have_it(myself, TX_TYPE, tx[TX_ID]):
-        update_have_it(myself, TX_TYPE, tx[TX_ID])
-        nodeState[myself][NODE_MEMPOOL].append(tx)
-        push_to_send(myself, tx[TX_ID])
+    update_neighbourhood_inv(myself, source, TX_TYPE, tx)
+    if not have_it(myself, TX_TYPE, tx):
+        update_have_it(myself, TX_TYPE, tx)
+        nodeState[myself][NODE_MEMPOOL].insert(tx)
+        push_to_send(myself, tx)
 
 
 def next_t_to_gen(myself):
@@ -489,16 +489,16 @@ def update_tx(myself, block):
             nodeState[myself][NODE_MEMPOOL].remove(tx)
 
         for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
-            update_neighbourhood_inv(myself, neighbour, TX_TYPE, tx[TX_ID])
+            update_neighbourhood_inv(myself, neighbour, TX_TYPE, tx)
 
-        if tx[TX_ID] in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
-            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx[TX_ID])
+        if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
+            nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
 
 def cmpctblock(block):
     cmpct_tx = []
     for tx in block[BLOCK_TX]:
-        cmpct_tx.append(tx[TX_ID])
+        cmpct_tx.append(tx)
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx,\
            block[BLOCK_TTL], block[BLOCK_RECEIVED_TS], get_extra_tx_to_send(block[BLOCK_TX])
 
@@ -522,7 +522,7 @@ def build_cmpctblock(myself, block_and_tx):
     while i < len(cmpctblock[BLOCK_TX]):
         if isinstance(cmpctblock[BLOCK_TX][i], int):
             for tx_in_block in block_and_tx[1]:
-                if cmpctblock[BLOCK_TX][i] == tx_in_block[TX_ID]:
+                if cmpctblock[BLOCK_TX][i] == tx_in_block:
                     cmpctblock[BLOCK_TX][i] = tx_in_block
                     block_and_tx[1].remove(tx_in_block)
                     break
@@ -621,25 +621,23 @@ def push_to_send(myself, id):
 def generate_new_tx(myself):
     global nodeState, tx_id
 
-    new_tx = (tx_id, random.randint(0, 100), 700)
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].insert(new_tx[TX_ID])
-    nodeState[myself][NODE_MEMPOOL].append(new_tx)
-    push_to_send(myself, new_tx[TX_ID])
+    new_tx = tx_id
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX].insert(new_tx)
+    nodeState[myself][NODE_MEMPOOL].insert(new_tx)
+    push_to_send(myself, new_tx)
 
     tx_id += 1
 
 
 def get_transaction(myself, tx_id):
-    for tx in reversed(nodeState[myself][NODE_MEMPOOL]):
-        if tx[TX_ID] == tx_id:
-            return tx
+    if tx_id in nodeState[myself][NODE_MEMPOOL]:
+        return tx_id
     return None
 
 
 def get_tx_in_block(block, tx_id):
-    for tx in block[BLOCK_TX]:
-        if tx[TX_ID] == tx_id:
-            return tx
+    if tx_id in block[BLOCK_TX]:
+        return tx_id
     return None
 
 
@@ -663,8 +661,8 @@ def get_tx_to_block(myself):
     tx_array = []
     list_to_iter = list(nodeState[myself][NODE_MEMPOOL])
     for tx in list_to_iter:
-        if size + tx[TX_SIZE] <= max_block_size:
-            size += tx[TX_SIZE]
+        if size + 700 <= max_block_size:
+            size += 700
             tx_array.append(tx)
             nodeState[myself][NODE_MEMPOOL].remove(tx)
         elif size + min_tx_size > max_block_size:
@@ -981,7 +979,7 @@ def createNode(neighbourhood):
     node_current_block = None
     node_inv = [SortedCollection(), SortedCollection()]
     node_partial_blocks = []
-    node_mempool = []
+    node_mempool = SortedCollection()
     node_blocks_already_requested = []
     node_tx_already_requested = []
     node_time_to_gen = -1
