@@ -919,10 +919,9 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
-        spam_writer.writerow(["Top nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX", "Avg missing tx",
-                              "Avg numb of tx per block", "% of duplicates inv",
-                              "Avg total sent messages", "Total number of branches",
-                              "Hops distribution"])
+        spam_writer.writerow(["Top nodes size", "Random nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX",
+                              "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
+                              "Total number of branches", "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
@@ -932,7 +931,7 @@ def wrapup():
                               sum_missingTX / nb_nodes, avg_tx_per_block, irrelevant_inv_in_per,
                               avg_total_sent_msg, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
-        spam_writer.writerow([top_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
+        spam_writer.writerow([top_nodes_size, random_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
                               irrelevant_inv_in_per, avg_total_sent_msg, nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
