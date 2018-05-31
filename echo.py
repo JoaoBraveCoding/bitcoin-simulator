@@ -46,6 +46,8 @@ BLOCK_TYPE, TX_TYPE = True, False
 
 RECEIVED_INV, RELEVANT_INV = 0, 1
 
+MINE, NOT_MINE = True, False
+
 
 def init():
     # schedule execution for all nodes
@@ -359,7 +361,7 @@ def TX(myself, source, tx):
     if not have_it(myself, TX_TYPE, tx):
         update_have_it(myself, TX_TYPE, tx)
         nodeState[myself][NODE_MEMPOOL][tx] = None
-        push_to_send(myself, tx)
+        push_to_send(myself, tx, NOT_MINE)
 
 
 def next_t_to_gen(myself):
@@ -608,10 +610,13 @@ def check_availability(myself, target, type, id):
     return False
 
 
-def push_to_send(myself, id):
+def push_to_send(myself, id, mine):
     global nodeState
 
-    nodes_to_send = get_nodes_to_send(myself)
+    if mine and hop_based_broadcast and early_push:
+        nodes_to_send = nodeState[myself][NODE_NEIGHBOURHOOD]
+    else:
+        nodes_to_send = get_nodes_to_send(myself)
 
     for node in nodes_to_send:
         if not check_availability(myself, node, TX_TYPE, id) and \
@@ -626,7 +631,7 @@ def generate_new_tx(myself):
     new_tx = tx_id
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
     nodeState[myself][NODE_MEMPOOL][new_tx] = None
-    push_to_send(myself, new_tx)
+    push_to_send(myself, new_tx, MINE)
 
     tx_id += 1
 
@@ -1149,6 +1154,7 @@ if __name__ == '__main__':
     top_nodes = -1
     random_nodes = -1
     create_new = True
+    early_push = False
     save_network_connections = False
     file_name = ""
     results_name = "results"
@@ -1169,6 +1175,8 @@ if __name__ == '__main__':
                 file_name = sys.argv[i+1]
             elif sys.argv[i] == "-rsn":
                 results_name = sys.argv[i+1]
+            elif sys.argv[i] == "-ep":
+                early_push = bool(sys.argv[i+1])
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
