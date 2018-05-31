@@ -366,7 +366,7 @@ def TX(myself, source, tx):
 def next_t_to_gen(myself):
     global nodeState
 
-    y = numpy.random.normal(0.60, 0.11)
+    y = numpy.random.normal(0.57, 0.11)
     if y > 1:
         x = - 10 * numpy.log(1-0.99)
     elif y < 0:
@@ -927,7 +927,7 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
-        spam_writer.writerow(["False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
+        spam_writer.writerow(["False", "False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, irrelevant_inv_in_per,
                               avg_total_sent_msg, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
