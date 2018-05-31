@@ -21,7 +21,6 @@ from sim import sim
 import utils
 from sortedList import SortedCollection
 
-
 BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS, BLOCK_EXTRA_TX \
     = 0, 1, 2, 3, 4, 5, 6, 7, 8
 
@@ -987,8 +986,8 @@ def createNode(neighbourhood):
     node_blocks_already_requested = []
     node_tx_already_requested = []
     node_time_to_gen = -1
-    node_neighbourhood_inv = {}
-    stats = {}
+    node_neighbourhood_inv = defaultdict()
+    stats = defaultdict()
     topx = []
     node_headers_requested = []
     for neighbour in neighbourhood:
@@ -1168,7 +1167,7 @@ if __name__ == '__main__':
                 create_new = False
                 save_network_connections = False
                 file_name = sys.argv[i+1]
-            elif sys.argv[i] == "-rn":
+            elif sys.argv[i] == "-rsn":
                 results_name = sys.argv[i+1]
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
