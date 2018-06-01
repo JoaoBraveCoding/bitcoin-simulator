@@ -279,6 +279,10 @@ def CMPCTBLOCK(myself, source, cmpctblock):
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, cmpctblock[BLOCK_ID])
         return
 
+    in_headers = get_header(myself, cmpctblock[BLOCK_ID])
+    if in_headers is not None:
+        nodeState[myself][NODE_HEADERS_TO_REQUEST].remove(cmpctblock[BLOCK_ID])
+
     if cmpctblock[BLOCK_EXTRA_TX]:
         for tx in cmpctblock[BLOCK_EXTRA_TX]:
             if tx not in nodeState[myself][NODE_MEMPOOL]:
@@ -919,7 +923,7 @@ def wrapup():
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
-        csv_file_to_write = open('out/results.csv', 'a')
+        csv_file_to_write = open('out/results.csv', 'w')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
@@ -939,6 +943,8 @@ def wrapup():
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
                               irrelevant_inv_in_per, avg_total_sent_msg, nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
+    csv_file_to_write.flush()
+    csv_file_to_write.close()
 
 
 def save_network():
