@@ -52,6 +52,8 @@ SENT, RECEIVED = 0, 1
 
 RECEIVE_TX, RECEIVED_BLOCKTX = 0, 1
 
+INV_BLOCK_ID, INV_BLOCK_TTL = 0, 1
+
 def init():
     # schedule execution for all nodes
     for nodeId in nodeState:
@@ -261,7 +263,9 @@ def GETDATA(myself, source, requesting_data):
             block = get_block(inv[INV_CONTENT_ID])
             if block is not None:
                 if block[BLOCK_GEN_NODE] != myself:
-                    block = inc_tll(block)
+                    block = list(block)
+                    block[BLOCK_TTL] = nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][block[BLOCK_ID]] + 1
+                    block = tuple(block)
                 sim.send(BLOCK, source, myself, block)
                 if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
                     nodeState[myself][MSGS][BLOCK_MSG] += 1
@@ -426,7 +430,7 @@ def generate_new_block(myself):
 
     # Store the new block
     blocks_created.append(new_block)
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].insert(new_block[BLOCK_ID])
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = 0
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block
     block_id += 1
     if new_block[BLOCK_HEIGHT] > highest_block:
@@ -462,6 +466,7 @@ def update_top(myself, source, score):
     if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] or \
             len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < top_nodes_size:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(source)
+        return
 
     worst_score = -1
     worst_index = -1
@@ -470,15 +475,16 @@ def update_top(myself, source, score):
         total_ttl = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][node][TOTAL_TLL]
         total_msg = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][node][TOTAL_MSG_RECEIVED]
         member_score = total_ttl/total_msg
-        if member_score <= score:
+        if member_score < score:
             continue
-        elif member_score > score and worst_score < member_score:
+        elif member_score >= score and worst_score < member_score:
             worst_score = member_score
             worst_index = i
         else:
             continue
 
-    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
+    if worst_index != -1:
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
 
 
 def process_block(myself, source, block):
@@ -486,7 +492,7 @@ def process_block(myself, source, block):
 
     # Check if it's a new block
     if not have_it(myself, BLOCK_TYPE, block[BLOCK_ID]):
-        update_have_it(myself, BLOCK_TYPE, block[BLOCK_ID])
+        update_have_it(myself, BLOCK_TYPE, [block[BLOCK_ID], block[BLOCK_TTL]])
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
                 block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
             nodeState[myself][NODE_CURRENT_BLOCK] = block
@@ -589,8 +595,8 @@ def update_have_it(myself, type, id):
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if type == BLOCK_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
-        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].insert(id)
+    if type == BLOCK_TYPE and id[INV_BLOCK_ID] not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][id[INV_BLOCK_ID]] = id[INV_BLOCK_TTL]
     elif type == TX_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
         nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][id] = None
 
@@ -1034,7 +1040,7 @@ def create_network(create_new, save_network_connections, neighbourhood_size, fil
 def createNode(neighbourhood):
     current_cycle = 0
     node_current_block = None
-    node_inv = [SortedCollection(), defaultdict()]
+    node_inv = [defaultdict(), defaultdict()]
     node_partial_blocks = []
     node_mempool = defaultdict()
     node_blocks_already_requested = []
