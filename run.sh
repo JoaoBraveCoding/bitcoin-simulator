@@ -7,6 +7,8 @@ numberPararelism=-1
 tn=0
 rn=0
 pids=()
+ep=False
+current_ep=False
 
 
 if [ -z "$1" ]
@@ -23,22 +25,32 @@ if ! [ -z "$3" ]
 then
   numberPararelism=$3
 fi
-(( cycles=$1*6-1))
+if ! [ -z "$4" ]
+then
+  ep=$4
+fi
+
+if [ "$ep" = "False" ]
+then
+  (( cycles=$1*6-1))
+else
+  (( cycles=$1*6*2-1))
+fi
+
 filename=$2
 
 
 #pypy echo.py conf_echo/ 1 -sn True
 while [ "$i" -le "$cycles" ]
 do
-    echo run: $runId -ln $filename -tn $tn -rn $rn
+    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep
     if [ "$numberPararelism" -eq "-1" ]
     then
-      #pypy echo.py conf_echo/ $runId -ln $filename -tn 2
       if [ "$runId" -eq "1" ]
       then
         pypy echo.py conf_echo/ $runId -sn True
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep
       fi
     else
       if [ "$runId" -eq "1" ]
@@ -47,7 +59,7 @@ do
         pids[$runId]=$!
         sleep 10 
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn &
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep & 
         pids[$runId]=$!
       fi
       ((numberPararelism=numberPararelism-1))
@@ -64,6 +76,15 @@ do
 
     if [ "$tn" -eq "-1" ]
     then
+      if [ "$ep" = "True" ]
+      then  
+        if  [ "$current_ep" = "False" ]
+        then
+          current_ep=True
+        else
+          current_ep=False
+        fi
+      fi
       ((tn=2))
       ((rn=2))
     fi

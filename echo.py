@@ -44,10 +44,13 @@ INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GE
 
 BLOCK_TYPE, TX_TYPE = True, False
 
-RECEIVED_INV, RELEVANT_INV = 0, 1
+RECEIVED_INV, RELEVANT_INV, RECEIVED_GETDATA = 0, 1, 2
 
 MINE, NOT_MINE = True, False
 
+SENT, RECEIVED = 0, 1
+
+RECEIVE_TX, RECEIVED_BLOCKTX = 0, 1
 
 def init():
     # schedule execution for all nodes
@@ -119,14 +122,16 @@ def CYCLE(myself):
             for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
                 if check_availability(myself, target, BLOCK_TYPE, new_block[BLOCK_PARENT_ID]):
                     sim.send(CMPCTBLOCK, target, myself, cmpctblock(new_block))
-                    nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
+                    if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                        nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
                     update_neighbourhood_inv(myself, target, BLOCK_TYPE, new_block[BLOCK_ID])
 
                 else:
                     vInv = [(BLOCK_TYPE, new_block[BLOCK_ID])]
                     # TODO change this send header and inv of possible parents
                     sim.send(INV, target, myself, vInv)
-                    nodeState[myself][MSGS][INV_MSG] += 1
+                    if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                        nodeState[myself][MSGS][INV_MSG][SENT] += 1
 
     # Send new transactions either created or received
     broadcast_invs(myself)
@@ -146,15 +151,23 @@ def INV(myself, source, vInv):
 
     ask_for = []
     headers_to_request = []
+    is_tx = False
     for inv in vInv:
         if inv[INV_TYPE] == TX_TYPE:
-            nodeState[myself][MSGS][ALL_INVS][RECEIVED_INV] += 1
+            if not is_tx:
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][INV_MSG][RECEIVED] += 1
+                is_tx = True
+
+            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                nodeState[myself][MSGS][ALL_INVS][RECEIVED_INV] += 1
             update_neighbourhood_inv(myself, source, TX_TYPE, inv[INV_CONTENT_ID])
             seen_tx = have_it(myself, TX_TYPE, inv[INV_CONTENT_ID])
             if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
-                nodeState[myself][MSGS][ALL_INVS][RELEVANT_INV] += 1
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][ALL_INVS][RELEVANT_INV] += 1
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
             update_neighbourhood_inv(myself, source, BLOCK_TYPE, inv[INV_CONTENT_ID])
@@ -169,11 +182,13 @@ def INV(myself, source, vInv):
 
     if ask_for:
         sim.send(GETDATA, source, myself, ask_for)
-        nodeState[myself][MSGS][GETDATA_MSG] += 1
+        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
 
     if headers_to_request:
         sim.send(GETHEADERS, source, myself, headers_to_request)
-        nodeState[myself][MSGS][GETHEADERS_MSG] += 1
+        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            nodeState[myself][MSGS][GETHEADERS_MSG] += 1
 
 
 def GETHEADERS(myself, source, get_headers):
@@ -193,7 +208,8 @@ def GETHEADERS(myself, source, get_headers):
             raise ValueError('GETHEADERS, else, node received invalid headerID')
 
     sim.send(HEADERS, source, myself, headers_to_send)
-    nodeState[myself][MSGS][HEADERS_MSG] += 1
+    if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+        nodeState[myself][MSGS][HEADERS_MSG] += 1
 
 
 def HEADERS(myself, source, headers):
@@ -209,7 +225,8 @@ def HEADERS(myself, source, headers):
     if len(data_to_request) <= 16:
         # If is a new block in the main chain try and direct fetch
         sim.send(GETDATA, source, myself, data_to_request)
-        nodeState[myself][MSGS][GETDATA_MSG] += 1
+        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
     else:
         # Else rely on other means of download
         # TODO Fix this case still don't know how it's done
@@ -223,13 +240,21 @@ def GETDATA(myself, source, requesting_data):
     new_connection(myself, source)
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-
+    is_tx = False
     for inv in requesting_data:
         if inv[INV_TYPE] == TX_TYPE:
+            if not is_tx:
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][GETDATA_MSG][RECEIVED] += 1
+                is_tx = True
+
+            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                nodeState[myself][MSGS][ALL_INVS][RECEIVED_GETDATA] += 1
             tx = get_transaction(myself, inv[INV_CONTENT_ID])
             if tx is not None:
                 sim.send(TX, source, myself, tx)
-                nodeState[myself][MSGS][TX_MSG] += 1
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][TX_MSG] += 1
                 update_neighbourhood_inv(myself, source, TX_TYPE, tx)
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
@@ -238,7 +263,8 @@ def GETDATA(myself, source, requesting_data):
                 if block[BLOCK_GEN_NODE] != myself:
                     block = inc_tll(block)
                 sim.send(BLOCK, source, myself, block)
-                nodeState[myself][MSGS][BLOCK_MSG] += 1
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][BLOCK_MSG] += 1
                 update_neighbourhood_inv(myself, source, BLOCK_TYPE, block[BLOCK_ID])
             else:
                 # This shouldn't happen in a simulated scenario
@@ -292,19 +318,16 @@ def CMPCTBLOCK(myself, source, cmpctblock):
 
     # Check if we have all tx
     tx_to_request = []
-    i = 0
-    while i < len(cmpctblock[BLOCK_TX]):
-        tx = get_transaction(myself, cmpctblock[BLOCK_TX][i])
+    for tx_id in cmpctblock[BLOCK_TX]:
+        tx = get_transaction(myself, tx_id)
         if tx is None:
-            tx_to_request.append(cmpctblock[BLOCK_TX][i])
-        else:
-            cmpctblock[BLOCK_TX][i] = tx
-        i += 1
+            tx_to_request.append(tx_id)
 
     if tx_to_request:
         sim.send(GETBLOCKTXN, source, myself, (cmpctblock[BLOCK_ID], tx_to_request))
-        nodeState[myself][MSGS][GETBLOCKTXN_MSG] += 1
-        nodeState[myself][MSGS][MISSING_TX] += len(tx_to_request)
+        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            nodeState[myself][MSGS][GETBLOCKTXN_MSG] += 1
+            nodeState[myself][MSGS][MISSING_TX] += len(tx_to_request)
         nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
     else:
         process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX])
@@ -329,7 +352,8 @@ def GETBLOCKTXN(myself, source, tx_request):
 
     if tx_to_send:
         sim.send(BLOCKTXN, source, myself, (tx_request[0], tx_to_send))
-        nodeState[myself][MSGS][BLOCKTXN_MSG] += 1
+        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            nodeState[myself][MSGS][BLOCKTXN_MSG] += 1
     else:
         raise ValueError('GETBLOCKTXN, else, this condition is not coded empty tx_to_send')
 
@@ -366,6 +390,8 @@ def TX(myself, source, tx):
         update_have_it(myself, TX_TYPE, tx)
         nodeState[myself][NODE_MEMPOOL][tx] = None
         push_to_send(myself, tx, NOT_MINE)
+        if tx_array:
+            tx_created[tx][RECEIVE_TX] += 1
 
 
 def next_t_to_gen(myself):
@@ -478,11 +504,13 @@ def process_block(myself, source, block):
             elif check_availability(myself, target, BLOCK_TYPE, block[BLOCK_PARENT_ID]):
                 block_to_send = inc_tll(block)
                 sim.send(CMPCTBLOCK, target, myself, cmpctblock(block_to_send))
-                nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
                 update_neighbourhood_inv(myself, target, BLOCK_TYPE, block_to_send[BLOCK_ID])
             else:
                 sim.send(HEADERS, target, myself, [get_block_header(block)])
-                nodeState[myself][MSGS][HEADERS_MSG] += 1
+                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    nodeState[myself][MSGS][HEADERS_MSG] += 1
 
     else:
         update_neighbour_statistics(myself, source, block[BLOCK_TTL])
@@ -526,19 +554,9 @@ def build_cmpctblock(myself, block_and_tx):
         raise ValueError('build_cmpctblock,  if cmpctblock is None, this condition is not coded, '
                          'cmpctblock_id not in partialblocks')
 
-    i = 0
-    while i < len(cmpctblock[BLOCK_TX]):
-        if isinstance(cmpctblock[BLOCK_TX][i], int):
-            for tx_in_block in block_and_tx[1]:
-                if cmpctblock[BLOCK_TX][i] == tx_in_block:
-                    cmpctblock[BLOCK_TX][i] = tx_in_block
-                    block_and_tx[1].remove(tx_in_block)
-                    break
-            i += 1
-        elif len(cmpctblock[BLOCK_TX][i]) == 3:
-            i += 1
-        else:
-            raise ValueError('build_cmpctblock, else, this condition is not coded, tx in block but not in mempool')
+    if tx_array:
+        for tx in block_and_tx[1]:
+            tx_created[tx][RECEIVED_BLOCKTX] += 1
 
     return cmpctblock
 
@@ -637,6 +655,8 @@ def generate_new_tx(myself):
     nodeState[myself][NODE_MEMPOOL][new_tx] = None
     push_to_send(myself, new_tx, MINE)
 
+    if tx_array:
+        tx_created.append([0, 0])
     tx_id += 1
 
 
@@ -693,7 +713,8 @@ def broadcast_invs(myself):
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
             sim.send(INV, target, myself, inv_to_send)
-            nodeState[myself][MSGS][INV_MSG] += 1
+            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                nodeState[myself][MSGS][INV_MSG][SENT] += 1
             nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND] = defaultdict()
 
 
@@ -739,7 +760,8 @@ def process_new_headers(myself, source, headers):
             #            .format(myself, header[HEADER_PARENT_ID]))
             headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
             sim.send(GETHEADERS, source, myself, headers_to_request)
-            nodeState[myself][MSGS][GETHEADERS_MSG] += 1
+            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                nodeState[myself][MSGS][GETHEADERS_MSG] += 1
             continue
 
         elif (seen_parent or header[HEADER_PARENT_ID] == -1) and (not seen_block and have_header is None):
@@ -845,20 +867,27 @@ def count_hops(to_call, called, seen, depth):
 
 def get_avg_tx_per_block():
     total_num_if_tx = 0
+    blocks_not_counted = 0
     for block in blocks_created:
-        if isinstance(block[BLOCK_TX], int):
-            total_num_if_tx += block[BLOCK_TX]
-        else:
-            total_num_if_tx += len(block[BLOCK_TX])
+        if (expert_log and 60 < block[BLOCK_TIMESTAMP] < nb_cycles - 60) or not expert_log:
+            if isinstance(block[BLOCK_TX], int):
+                total_num_if_tx += block[BLOCK_TX]
+            else:
+                total_num_if_tx += len(block[BLOCK_TX])
+        elif expert_log:
+            blocks_not_counted += 1
 
-    return total_num_if_tx/block_id
+    return total_num_if_tx/(block_id - blocks_not_counted)
 
 
 def get_avg_total_sent_msg():
     total_sent = [0] * nb_nodes
     for node in xrange(nb_nodes):
         for i in range(INV_MSG, MISSING_TX):
-            total_sent[node] += nodeState[node][MSGS][i]
+            if i == 0 or i == 3:
+                total_sent[node] += nodeState[node][MSGS][i][SENT]
+            else:
+                total_sent[node] += nodeState[node][MSGS][i]
 
     total_sent = sum(total_sent)
 
@@ -882,6 +911,7 @@ def wrapup():
     missing_tx = map(lambda x: nodeState[x][MSGS][MISSING_TX], nodeState)
     all_inv = map(lambda x: nodeState[x][MSGS][ALL_INVS][RECEIVED_INV], nodeState)
     relevant_inv = map(lambda x: nodeState[x][MSGS][ALL_INVS][RELEVANT_INV], nodeState)
+    all_getdata = map(lambda x: nodeState[x][MSGS][ALL_INVS][RECEIVED_GETDATA], nodeState)
 
     sum_received_blocks = map(lambda x: nodeState[x][NODE_INV][NODE_INV_RECEIVED_BLOCKS], nodeState)
     #receivedBlocks = map(lambda x: map(lambda y: (sum_received_blocks[x][y][0], sum_received_blocks[x][y][1],
@@ -903,23 +933,32 @@ def wrapup():
     sum_missingTX = 0
     sum_all_inv = 0
     sum_relevant_inv = 0
+    sum_received_invs = 0
+    sum_received_getdata = 0
+    sum_all_getdata = 0
     for i in range(0, nb_nodes):
-        sum_inv += inv_messages[i]
-        sum_getData += getdata_messages[i]
+        sum_inv += inv_messages[i][SENT]
+        sum_received_invs += inv_messages[i][RECEIVED]
+        sum_getData += getdata_messages[i][SENT]
+        sum_received_getdata += getdata_messages[i][RECEIVED]
         sum_tx += tx_messages[i]
         sum_getBlockTX += getblocktx_messages[i]
         sum_missingTX += missing_tx[i]
         sum_all_inv += all_inv[i]
         sum_relevant_inv += relevant_inv[i]
+        sum_all_getdata += all_getdata[i]
 
     #avg_block_diss = avg_block_dissemination()
     nb_forks = fork_rate()
     hops_distribution = get_miner_hops()
     avg_tx_per_block = get_avg_tx_per_block()
     avg_total_sent_msg = get_avg_total_sent_msg()
-    inv_per_node_sent = sum_all_inv / nb_nodes
-    unique_inv_per_node_received = sum_relevant_inv/nb_nodes
-    irrelevant_inv_in_per = inv_per_node_sent/unique_inv_per_node_received
+    # ---------
+    avg_duplicated_inv = sum_all_inv/sum_relevant_inv
+    # ---------
+    avg_entries_per_inv = sum_all_inv/sum_received_invs
+    avg_entries_per_getdata = sum_all_getdata/sum_received_getdata
+
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
@@ -927,7 +966,8 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
-        spam_writer.writerow(["Top nodes size", "Random nodes size", "Avg inv", "Avg getData", "Avg Tx", "Avg getBlockTX",
+        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Avg inv", "Avg entries per inv",
+                              "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
                               "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
                               "Total number of branches", "Hops distribution"])
     else:
@@ -935,20 +975,23 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
-        spam_writer.writerow(["False", "False", sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
-                              sum_missingTX / nb_nodes, avg_tx_per_block, irrelevant_inv_in_per,
+        spam_writer.writerow(["False", "False", early_push, sum_inv / nb_nodes, avg_entries_per_inv, sum_getData / nb_nodes,
+                              avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
+                              sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
                               avg_total_sent_msg, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
-        spam_writer.writerow([top_nodes_size, random_nodes_size, sum_inv / nb_nodes, sum_getData / nb_nodes, sum_tx / nb_nodes,
+        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, sum_inv / nb_nodes, avg_entries_per_inv,
+                              sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
-                              irrelevant_inv_in_per, avg_total_sent_msg, nb_forks,
+                              avg_duplicated_inv, avg_total_sent_msg, nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
     csv_file_to_write.flush()
     csv_file_to_write.close()
 
 
 def save_network():
-    with open('networks/{}-{}-{}'.format(nb_nodes, number_of_miners, extra_replicas), 'w') as file_to_write:
+    with open('networks/{}-{}-{}'.format(nb_nodes-(number_of_miners*extra_replicas), number_of_miners, extra_replicas), 'w') \
+            as file_to_write:
         file_to_write.write("{} {} {}\n".format(nb_nodes, number_of_miners, extra_replicas))
         for n in xrange(nb_nodes):
             file_to_write.write(str(nodeState[n][NODE_NEIGHBOURHOOD]) + '\n')
@@ -1006,7 +1049,7 @@ def createNode(neighbourhood):
         stats[neighbour] = [0, 0]
     node_neighbourhood_stats = [topx, stats]
 
-    msgs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0]]
+    msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
@@ -1051,7 +1094,7 @@ def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
-        total_blocks_mined_by_randoms, highest_block, random_nodes_size
+        total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1079,6 +1122,7 @@ def configure(config):
     nb_cycles = config['NUMBER_OF_CYCLES']
     max_block_size = int(config['MAX_BLOCK_SIZE'])
 
+    tx_array = bool(config['TX_ARRAY'])
     number_of_tx_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
     min_tx_size = int(config['MIN_TX_SIZE'])
     max_tx_size = int(config['MAX_TX_SIZE'])
@@ -1086,11 +1130,16 @@ def configure(config):
     blocks_mined_by_randoms = 0
     total_blocks_mined_by_randoms = (nb_cycles/10) * 0.052
 
+    expert_log = bool(config['EXPERT_LOG'])
+    if expert_log == True:
+        if nb_cycles <= 120:
+            raise ValueError("With expert_log activated you have to complete more than 120 cycles")
 
     block_id = 0
     blocks_created = []
     highest_block = -1
     tx_id = 0
+    tx_created = []
 
     values = []
     i = -1
