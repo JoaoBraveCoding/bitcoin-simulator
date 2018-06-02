@@ -1217,9 +1217,9 @@ if __name__ == '__main__':
         i = 3
         while i < len(sys.argv):
             if sys.argv[i] == "-cn":
-                create_new = bool(sys.argv[i+1])
+                create_new = sys.argv[i+1]
             elif sys.argv[i] == "-sn":
-                save_network_connections = bool(sys.argv[i+1])
+                save_network_connections = sys.argv[i+1]
             elif sys.argv[i] == "-tn":
                 top_nodes = int(sys.argv[i+1])
             elif sys.argv[i] == "-rn":
@@ -1231,7 +1231,7 @@ if __name__ == '__main__':
             elif sys.argv[i] == "-rsn":
                 results_name = sys.argv[i+1]
             elif sys.argv[i] == "-ep":
-                early_push = bool(sys.argv[i+1])
+                early_push = sys.argv[i+1]
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
