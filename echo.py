@@ -29,7 +29,7 @@ HEADER_ID, HEADER_PARENT_ID = 0, 1
 
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, \
     NODE_BLOCKS_ALREADY_REQUESTED, NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, \
-    NODE_NEIGHBOURHOOD_STATS, MSGS, NODE_HEADERS_TO_REQUEST = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+    NODE_NEIGHBOURHOOD_STATS, MSGS, NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
@@ -54,6 +54,8 @@ RECEIVE_TX, RECEIVED_BLOCKTX = 0, 1
 
 INV_BLOCK_ID, INV_BLOCK_TTL = 0, 1
 
+TIME, INBOUND = 0, 1
+
 def init():
     # schedule execution for all nodes
     for nodeId in nodeState:
@@ -66,7 +68,7 @@ def init():
 
 
 def improve_performance(cycle):
-    if cycle % 10 != 0 or cycle == 0:
+    if cycle % 600 != 0 or cycle == 0:
         return
 
     for i in xrange(len(blocks_created)):
@@ -94,12 +96,12 @@ def CYCLE(myself):
         return
 
     # show progress for one node
-    if myself == 0:
+    if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
-        output.flush()
-        #print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        #output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        #output.flush()
+        print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
 
     # If a node can generate transactions
     i = 0
@@ -710,11 +712,31 @@ def get_tx_to_block(myself):
     return tx_array
 
 
+def update_time_to_send(myself, target):
+    global nodeState
+
+    current_cycle = nodeState[myself][CURRENT_CYCLE]
+    if nodeState[myself][NODE_TIME_TO_SEND][target][INBOUND]:
+        time_increment = poisson_send(current_cycle, 5)
+    else:
+        time_increment = poisson_send(current_cycle, 2.5)
+
+    nodeState[myself][NODE_TIME_TO_SEND][target][TIME] = time_increment
+
+
+def poisson_send(cycle, avg_inc):
+    return cycle + avg_inc + random.choice(xrange(15))
+
+
 def broadcast_invs(myself):
     global nodeState
 
+    current_cycle = nodeState[myself][CURRENT_CYCLE]
     for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
-        if len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
+        time_to_send = nodeState[myself][NODE_TIME_TO_SEND][target][TIME]
+        if current_cycle > time_to_send and \
+                len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
+            update_time_to_send(myself, target)
             inv_to_send = []
             for tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
                 if not check_availability(myself, target, TX_TYPE, tx):
@@ -800,6 +822,7 @@ def new_connection(myself, source):
         nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), defaultdict(), defaultdict()]
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
+        nodeState[myself][NODE_TIME_TO_SEND][source] = [poisson_send(nodeState[myself][CURRENT_CYCLE], 5), True]
 
 
 def get_all_genesis():
@@ -996,6 +1019,7 @@ def wrapup():
                               ''.join(str(e) + " " for e in hops_distribution)])
     csv_file_to_write.flush()
     csv_file_to_write.close()
+    print(tx_id)
 
 
 def save_network():
@@ -1060,18 +1084,20 @@ def createNode(neighbourhood):
     node_time_to_gen = -1
     node_neighbourhood_inv = defaultdict()
     stats = defaultdict()
+    time_to_send = defaultdict()
     topx = []
     node_headers_requested = []
     for neighbour in neighbourhood:
         node_neighbourhood_inv[neighbour] = [SortedCollection(), defaultdict(), defaultdict()]
         stats[neighbour] = [0, 0]
+        time_to_send[neighbour] = [poisson_send(0, 2.5), False]
     node_neighbourhood_stats = [topx, stats]
 
     msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
-            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested]
+            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send]
 
 
 def create_nodes_and_miners(neighbourhood_size):
@@ -1165,18 +1191,20 @@ def configure(config):
 
     values = []
     i = -1
-    j = 20
+    j = 20*60
     while i < 20:
         values.append((i, i + 1, j))
         i += 1
-        j -= 1
+        j -= 60
 
     create_network(create_new, save_network_connections, neighbourhood_size, file_name)
 
     if number_of_tx_to_gen_per_cycle//nb_nodes == 0:
         nodes_to_gen_tx = []
         for i in range(0, nb_cycles):
-            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes), number_of_tx_to_gen_per_cycle))
+            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes),
+                                        random.choice([number_of_tx_to_gen_per_cycle,
+                                                       number_of_tx_to_gen_per_cycle + 1])))
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
