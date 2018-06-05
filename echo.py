@@ -973,7 +973,7 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
-        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Avg inv", "Avg entries per inv",
+        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad miners", "Avg inv", "Avg entries per inv",
                               "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
                               "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
                               "Total number of branches", "Hops distribution"])
@@ -982,12 +982,12 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
-        spam_writer.writerow(["False", "False", early_push, sum_inv / nb_nodes, avg_entries_per_inv, sum_getData / nb_nodes,
+        spam_writer.writerow(["False", "False", early_push, number_of_bad_miners, sum_inv / nb_nodes, avg_entries_per_inv, sum_getData / nb_nodes,
                               avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
                               avg_total_sent_msg, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
-        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, sum_inv / nb_nodes, avg_entries_per_inv,
+        spam_writer.writerow([top_nodes_size, random_nodes_size, number_of_bad_miners, early_push, sum_inv / nb_nodes, avg_entries_per_inv,
                               sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
                               avg_duplicated_inv, avg_total_sent_msg, nb_forks,
