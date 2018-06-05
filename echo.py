@@ -725,7 +725,7 @@ def update_time_to_send(myself, target):
 
 
 def poisson_send(cycle, avg_inc):
-    return cycle + avg_inc + random.choice(xrange(15))
+    return cycle + (numpy.log1p(random.random() * -0.0015527136788) * avg_inc * -1000000 + 0.5)
 
 
 def broadcast_invs(myself):
