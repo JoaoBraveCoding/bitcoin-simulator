@@ -126,7 +126,7 @@ def CYCLE(myself):
             for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
                 if check_availability(myself, target, BLOCK_TYPE, new_block[BLOCK_PARENT_ID]):
                     sim.send(CMPCTBLOCK, target, myself, cmpctblock(new_block))
-                    if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                         nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
                     update_neighbourhood_inv(myself, target, BLOCK_TYPE, new_block[BLOCK_ID])
 
@@ -134,7 +134,7 @@ def CYCLE(myself):
                     vInv = [(BLOCK_TYPE, new_block[BLOCK_ID])]
                     # TODO change this send header and inv of possible parents
                     sim.send(INV, target, myself, vInv)
-                    if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                    if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                         nodeState[myself][MSGS][INV_MSG][SENT] += 1
 
     # Send new transactions either created or received
@@ -159,18 +159,18 @@ def INV(myself, source, vInv):
     for inv in vInv:
         if inv[INV_TYPE] == TX_TYPE:
             if not is_tx:
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][INV_MSG][RECEIVED] += 1
                 is_tx = True
 
-            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                 nodeState[myself][MSGS][ALL_INVS][RECEIVED_INV] += 1
             update_neighbourhood_inv(myself, source, TX_TYPE, inv[INV_CONTENT_ID])
             seen_tx = have_it(myself, TX_TYPE, inv[INV_CONTENT_ID])
             if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
                 ask_for.append(inv)
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][ALL_INVS][RELEVANT_INV] += 1
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
@@ -186,19 +186,17 @@ def INV(myself, source, vInv):
 
     if ask_for:
         sim.send(GETDATA, source, myself, ask_for)
-        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+        if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
 
     if headers_to_request:
         sim.send(GETHEADERS, source, myself, headers_to_request)
-        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+        if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETHEADERS_MSG] += 1
 
 
 def GETHEADERS(myself, source, get_headers):
     global nodeState
-
-    new_connection(myself, source)
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
@@ -212,7 +210,7 @@ def GETHEADERS(myself, source, get_headers):
             raise ValueError('GETHEADERS, else, node received invalid headerID')
 
     sim.send(HEADERS, source, myself, headers_to_send)
-    if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+    if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
         nodeState[myself][MSGS][HEADERS_MSG] += 1
 
 
@@ -229,7 +227,7 @@ def HEADERS(myself, source, headers):
     if len(data_to_request) <= 16:
         # If is a new block in the main chain try and direct fetch
         sim.send(GETDATA, source, myself, data_to_request)
-        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+        if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
     else:
         # Else rely on other means of download
@@ -241,23 +239,21 @@ def HEADERS(myself, source, headers):
 def GETDATA(myself, source, requesting_data):
     global nodeState
 
-    new_connection(myself, source)
-
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
     is_tx = False
     for inv in requesting_data:
         if inv[INV_TYPE] == TX_TYPE:
             if not is_tx:
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][GETDATA_MSG][RECEIVED] += 1
                 is_tx = True
 
-            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                 nodeState[myself][MSGS][ALL_INVS][RECEIVED_GETDATA] += 1
             tx = get_transaction(myself, inv[INV_CONTENT_ID])
             if tx is not None:
                 sim.send(TX, source, myself, tx)
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][TX_MSG] += 1
                 update_neighbourhood_inv(myself, source, TX_TYPE, tx)
 
@@ -269,7 +265,7 @@ def GETDATA(myself, source, requesting_data):
                     block[BLOCK_TTL] = nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][block[BLOCK_ID]] + 1
                     block = tuple(block)
                 sim.send(BLOCK, source, myself, block)
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][BLOCK_MSG] += 1
                 update_neighbourhood_inv(myself, source, BLOCK_TYPE, block[BLOCK_ID])
             else:
@@ -283,8 +279,6 @@ def GETDATA(myself, source, requesting_data):
 
 def BLOCK(myself, source, block):
     global nodeState
-
-    new_connection(myself, source)
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
@@ -331,7 +325,7 @@ def CMPCTBLOCK(myself, source, cmpctblock):
 
     if tx_to_request:
         sim.send(GETBLOCKTXN, source, myself, (cmpctblock[BLOCK_ID], tx_to_request))
-        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+        if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETBLOCKTXN_MSG] += 1
             nodeState[myself][MSGS][MISSING_TX] += len(tx_to_request)
         nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
@@ -341,8 +335,6 @@ def CMPCTBLOCK(myself, source, cmpctblock):
 
 def GETBLOCKTXN(myself, source, tx_request):
     global nodeState
-
-    new_connection(myself, source)
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
@@ -358,7 +350,7 @@ def GETBLOCKTXN(myself, source, tx_request):
 
     if tx_to_send:
         sim.send(BLOCKTXN, source, myself, (tx_request[0], tx_to_send))
-        if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+        if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][BLOCKTXN_MSG] += 1
     else:
         raise ValueError('GETBLOCKTXN, else, this condition is not coded empty tx_to_send')
@@ -366,8 +358,6 @@ def GETBLOCKTXN(myself, source, tx_request):
 
 def BLOCKTXN(myself, source, tx_requested):
     global nodeState
-
-    new_connection(myself, source)
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
@@ -383,8 +373,6 @@ def BLOCKTXN(myself, source, tx_requested):
 
 def TX(myself, source, tx):
     global nodeState
-
-    new_connection(myself, source)
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
@@ -513,12 +501,12 @@ def process_block(myself, source, block):
             elif check_availability(myself, target, BLOCK_TYPE, block[BLOCK_PARENT_ID]):
                 block_to_send = inc_tll(block)
                 sim.send(CMPCTBLOCK, target, myself, cmpctblock(block_to_send))
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
                 update_neighbourhood_inv(myself, target, BLOCK_TYPE, block_to_send[BLOCK_ID])
             else:
                 sim.send(HEADERS, target, myself, [get_block_header(block)])
-                if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+                if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][HEADERS_MSG] += 1
 
     else:
@@ -725,7 +713,10 @@ def update_time_to_send(myself, target):
 
 
 def poisson_send(cycle, avg_inc):
-    return cycle + (numpy.log1p(random.random() * -0.0015527136788) * avg_inc * -1000000 + 0.5)
+    if avg_inc == 5:
+        return cycle + 5 * random.randrange(3, 30)
+    else:
+        return cycle + 2 * random.randrange(1, 3)
 
 
 def broadcast_invs(myself):
@@ -742,7 +733,7 @@ def broadcast_invs(myself):
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
             sim.send(INV, target, myself, inv_to_send)
-            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                 nodeState[myself][MSGS][INV_MSG][SENT] += 1
             nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND] = defaultdict()
 
@@ -789,7 +780,7 @@ def process_new_headers(myself, source, headers):
             #            .format(myself, header[HEADER_PARENT_ID]))
             headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
             sim.send(GETHEADERS, source, myself, headers_to_request)
-            if (expert_log and 60 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 60) or not expert_log:
+            if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                 nodeState[myself][MSGS][GETHEADERS_MSG] += 1
             continue
 
@@ -899,7 +890,7 @@ def get_avg_tx_per_block():
     total_num_if_tx = 0
     blocks_not_counted = 0
     for block in blocks_created:
-        if (expert_log and 60 < block[BLOCK_TIMESTAMP] < nb_cycles - 60) or not expert_log:
+        if (expert_log and 600 < block[BLOCK_TIMESTAMP] < nb_cycles - 600) or not expert_log:
             if isinstance(block[BLOCK_TX], int):
                 total_num_if_tx += block[BLOCK_TX]
             else:
@@ -1180,7 +1171,7 @@ def configure(config):
 
     expert_log = bool(config['EXPERT_LOG'])
     if expert_log == True:
-        if nb_cycles <= 120:
+        if nb_cycles <= 1200:
             raise ValueError("With expert_log activated you have to complete more than 120 cycles")
 
     block_id = 0
