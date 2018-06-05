@@ -729,9 +729,11 @@ def broadcast_invs(myself):
                 len(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]) > 0:
             update_time_to_send(myself, target)
             inv_to_send = []
-            for tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND]:
+            copy = dict(nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_TX_TO_SEND])
+            for tx in copy:
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
+                    update_neighbourhood_inv(myself, target, TX_TYPE, tx)
             sim.send(INV, target, myself, inv_to_send)
             if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                 nodeState[myself][MSGS][INV_MSG][SENT] += 1
