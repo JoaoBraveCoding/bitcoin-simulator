@@ -393,7 +393,8 @@ def TX(myself, source, tx):
     if not have_it(myself, TX_TYPE, tx):
         update_have_it(myself, TX_TYPE, tx)
         nodeState[myself][NODE_MEMPOOL][tx] = None
-        push_to_send(myself, tx, NOT_MINE)
+        if myself not in bad_miners:
+            push_to_send(myself, tx, NOT_MINE)
         if tx_array:
             tx_created[tx][RECEIVE_TX] += 1
 
@@ -1002,10 +1003,11 @@ def save_network():
         for n in xrange(nb_nodes):
             file_to_write.write(str(nodeState[n][NODE_NEIGHBOURHOOD]) + '\n')
         file_to_write.write(str(miners) + '\n')
+        file_to_write.write(str(bad_miners) + '\n')
 
 
 def load_network(filename):
-    global nodeState, nb_nodes, number_of_miners, extra_replicas, miners
+    global nodeState, nb_nodes, number_of_miners, extra_replicas, miners, bad_miners
 
     if filename == "":
         raise ValueError("No file named inputted in not create new run")
@@ -1018,6 +1020,13 @@ def load_network(filename):
         for n in xrange(nb_nodes):
             nodeState[n] = createNode(ast.literal_eval(file_to_read.readline()))
         miners = ast.literal_eval(file_to_read.readline())
+        bad_miners = ast.literal_eval(file_to_read.readline())
+
+
+def create_bad_miner():
+    global bad_miners
+
+    bad_miners = random.sample(miners, number_of_bad_miners)
 
 
 def create_network(create_new, save_network_connections, neighbourhood_size, filename=""):
@@ -1031,6 +1040,7 @@ def create_network(create_new, save_network_connections, neighbourhood_size, fil
     if first_time or create_new:
         create_nodes_and_miners(neighbourhood_size)
         create_miner_replicas(neighbourhood_size)
+        create_bad_miner()
         if save_network_connections:
             save_network()
     else:
@@ -1100,7 +1110,8 @@ def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
-        total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log
+        total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
+        number_of_bad_miners
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1121,6 +1132,9 @@ def configure(config):
     else:
         top_nodes_size = int(config['TOP_NODES_SIZE'])
         hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
+
+    if number_of_bad_miners == 0:
+        number_of_bad_miners = int(config['NUMBER_OF_BAD_MINERS'])
 
     number_of_miners = int(config['NUMBER_OF_MINERS'])
     extra_replicas = int(config['EXTRA_REPLICAS'])
@@ -1219,6 +1233,7 @@ if __name__ == '__main__':
     save_network_connections = False
     file_name = ""
     results_name = "results"
+    number_of_bad_miners = 0
     if len(sys.argv) > 3:
         i = 3
         while i < len(sys.argv):
@@ -1238,6 +1253,8 @@ if __name__ == '__main__':
                 results_name = sys.argv[i+1]
             elif sys.argv[i] == "-ep":
                 early_push = sys.argv[i+1]
+            elif sys.argv[i] == "-bm":
+                number_of_bad_miners = int(sys.argv[i+1])
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
