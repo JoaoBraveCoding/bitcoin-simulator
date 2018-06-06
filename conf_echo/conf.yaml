@@ -10,7 +10,7 @@ TOP_NODES_SIZE: 1
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
-NUMBER_OF_CYCLES : 86400
+NUMBER_OF_CYCLES : 10800
 # duration of node cycle
 NODE_CYCLE: 1250
 

@@ -6,6 +6,7 @@ from __future__ import division
 import ast
 import csv
 import gc
+from copy import copy
 
 import datetime
 import time
@@ -111,9 +112,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        #output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
-        #output.flush()
-        print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        output.write('{} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
+        output.flush()
+        #print('{} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE]))
 
     # If a node can generate transactions
     i = 0
@@ -401,7 +402,7 @@ def TX(myself, source, tx):
 def next_t_to_gen(myself):
     global nodeState
 
-    y = numpy.random.normal(0.57, 0.11)
+    y = numpy.random.normal(0.6, 0.11)
     if y > 1:
         x = - 10 * numpy.log(1-0.99)
     elif y < 0:
