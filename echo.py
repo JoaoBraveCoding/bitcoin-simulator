@@ -5,6 +5,8 @@ from __future__ import division
 
 import ast
 import csv
+import gc
+
 import datetime
 import time
 from collections import defaultdict
@@ -86,6 +88,7 @@ def improve_performance(cycle):
             replace_block = list(blocks_created[i])
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
             blocks_created[i] = tuple(replace_block)
+            gc.collect()
 
 
 def CYCLE(myself):
@@ -1195,9 +1198,13 @@ def configure(config):
     if number_of_tx_to_gen_per_cycle//nb_nodes == 0:
         nodes_to_gen_tx = []
         for i in range(0, nb_cycles):
-            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes),
-                                        random.choice([number_of_tx_to_gen_per_cycle,
-                                                       number_of_tx_to_gen_per_cycle + 1])))
+            value = random.random()
+            if value < 0.3:
+                number_of_tx = number_of_tx_to_gen_per_cycle + 1
+            else:
+                number_of_tx = number_of_tx_to_gen_per_cycle
+
+            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes), number_of_tx))
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
@@ -1248,6 +1255,8 @@ if __name__ == '__main__':
     confFile = dumpPath + '/conf.yaml'
     runId = int(sys.argv[2])
     f = open(confFile)
+
+    gc.enable()
 
     top_nodes = -1
     random_nodes = -1
