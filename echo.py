@@ -88,6 +88,9 @@ def improve_performance(cycle):
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
                             del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND][tx]
 
+            for myself in xrange(nb_nodes):
+                nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][i] = None
+
             replace_block = list(blocks_created[i])
             tx_list = replace_block[BLOCK_TX]
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
@@ -441,7 +444,9 @@ def generate_new_block(myself):
 def inc_tll(block):
     lst = list(block)
     lst[BLOCK_TTL] += 1
-    return tuple(lst)
+    to_ret = tuple(lst)
+    del lst
+    return to_ret
 
 
 def get_block(myself, block_id):
@@ -743,6 +748,7 @@ def broadcast_invs(myself):
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
                     update_neighbourhood_inv(myself, target, TX_TYPE, tx)
+            del copy
             sim.send(INV, target, myself, inv_to_send)
             if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                 nodeState[myself][MSGS][INV_MSG][SENT] += 1
@@ -766,8 +772,8 @@ def get_nodes_to_send(myself):
         for node in top_nodes:
             if node in collection_of_neighbours:
                 collection_of_neighbours.remove(node)
-
         random_nodes = random.sample(collection_of_neighbours, total)
+        del collection_of_neighbours
 
     return top_nodes + random_nodes
 
