@@ -98,10 +98,10 @@ def improve_performance(cycle):
             blocks_created[i] = tuple(replace_block)
             del replace_block
             del tx_list
-            gc.collect()
-            if gc.garbage:
-                gc.garbage[0].set_next(None)
-                del gc.garbage[:]
+    gc.collect()
+    if gc.garbage:
+        gc.garbage[0].set_next(None)
+        del gc.garbage[:]
 
 
 def CYCLE(myself):
@@ -115,9 +115,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        #output.flush()
-        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.flush()
+        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -451,7 +451,6 @@ def super_get_block(block_id):
         if item[0] == block_id:
             return item
     return None
-
 
 
 def update_neighbour_statistics(myself, source, block_ttl):
@@ -955,31 +954,6 @@ def wrapup():
                         dumpPath + '/messages-' + str(runId) + '.gpData',
                         ['inv getheaders headers getdata block cmpctblock getblocktx blocktx tx'
                          '           sum_received_blocks                    receivedBlocks'])
-
-    inbound = []
-    outbound = []
-    for node in xrange(nb_nodes):
-        out = 0
-        inb = 0
-        for neibour in nodeState[node][NODE_NEIGHBOURHOOD]:
-            if nodeState[node][NODE_TIME_TO_SEND][neibour][INBOUND]:
-                inb += 1
-            else:
-                out += 1
-
-        outbound.append(out)
-        inbound.append(inb)
-
-    utils.dump_as_gnu_plot([all_inv, relevant_inv, outbound, inbound],
-                        dumpPath + '/lists-' + str(runId) + '.gpData',
-                        ['all_inv  relevant_inv  outbound  inbounds'])
-
-    file_to_write = open('out/lists-2.txt', 'w')
-    file_to_write.write("{}\n".format(all_inv))
-    file_to_write.write("{}\n".format(relevant_inv))
-    file_to_write.write("{}\n".format(outbound))
-    file_to_write.write("{}\n".format(inbound))
-    file_to_write.close()
 
     sum_inv = 0
     sum_getData = 0
