@@ -23,8 +23,8 @@ from sim import sim
 import utils
 from sortedList import SortedCollection
 
-BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS, BLOCK_EXTRA_TX \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8
+BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS \
+    = 0, 1, 2, 3, 4, 5, 6, 7
 
 INV_TYPE, INV_CONTENT_ID = 0, 1
 HEADER_ID, HEADER_PARENT_ID = 0, 1
@@ -148,6 +148,7 @@ def CYCLE(myself):
                     sim.send(INV, target, myself, vInv)
                     if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                         nodeState[myself][MSGS][INV_MSG][SENT] += 1
+            del new_block
 
     # Send new transactions either created or received
     broadcast_invs(myself)
@@ -200,11 +201,13 @@ def INV(myself, source, vInv):
         sim.send(GETDATA, source, myself, ask_for)
         if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
+        del ask_for
 
     if headers_to_request:
         sim.send(GETHEADERS, source, myself, headers_to_request)
         if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETHEADERS_MSG] += 1
+        del headers_to_request
 
 
 def GETHEADERS(myself, source, get_headers):
@@ -224,6 +227,7 @@ def GETHEADERS(myself, source, get_headers):
     sim.send(HEADERS, source, myself, headers_to_send)
     if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
         nodeState[myself][MSGS][HEADERS_MSG] += 1
+    del headers_to_send
 
 
 def HEADERS(myself, source, headers):
@@ -241,6 +245,7 @@ def HEADERS(myself, source, headers):
         sim.send(GETDATA, source, myself, data_to_request)
         if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETDATA_MSG][SENT] += 1
+        del data_to_request
     else:
         # Else rely on other means of download
         # TODO Fix this case still don't know how it's done
@@ -280,6 +285,7 @@ def GETDATA(myself, source, requesting_data):
                 if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
                     nodeState[myself][MSGS][BLOCK_MSG] += 1
                 update_neighbourhood_inv(myself, source, BLOCK_TYPE, block[BLOCK_ID])
+                del block
             else:
                 # This shouldn't happen in a simulated scenario
                 raise ValueError('GETDATA, MSG_BLOCK else, this condition is not coded and shouldn\'t happen')
@@ -299,7 +305,6 @@ def BLOCK(myself, source, block):
 
     if block[BLOCK_ID] in nodeState[myself][NODE_HEADERS_TO_REQUEST]:
         nodeState[myself][NODE_HEADERS_TO_REQUEST].remove(block[BLOCK_ID])
-
 
     process_block(myself, source, block)
 
@@ -321,13 +326,6 @@ def CMPCTBLOCK(myself, source, cmpctblock):
     if in_headers is not None:
         nodeState[myself][NODE_HEADERS_TO_REQUEST].remove(cmpctblock[BLOCK_ID])
 
-    if cmpctblock[BLOCK_EXTRA_TX]:
-        for tx in cmpctblock[BLOCK_EXTRA_TX]:
-            if tx not in nodeState[myself][NODE_MEMPOOL]:
-                nodeState[myself][NODE_MEMPOOL][tx] = None
-                nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
-
-
     # Check if we have all tx
     tx_to_request = []
     for tx_id in cmpctblock[BLOCK_TX]:
@@ -340,9 +338,10 @@ def CMPCTBLOCK(myself, source, cmpctblock):
         if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][GETBLOCKTXN_MSG] += 1
             nodeState[myself][MSGS][MISSING_TX] += len(tx_to_request)
-        nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock[:BLOCK_EXTRA_TX])
+        nodeState[myself][NODE_PARTIAL_BLOCKS].append(cmpctblock)
+        del tx_to_request
     else:
-        process_block(myself, source, cmpctblock[:BLOCK_EXTRA_TX])
+        process_block(myself, source, cmpctblock)
 
 
 def GETBLOCKTXN(myself, source, tx_request):
@@ -364,6 +363,7 @@ def GETBLOCKTXN(myself, source, tx_request):
         sim.send(BLOCKTXN, source, myself, (tx_request[0], tx_to_send))
         if (expert_log and 600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 600) or not expert_log:
             nodeState[myself][MSGS][BLOCKTXN_MSG] += 1
+        del tx_to_send
     else:
         raise ValueError('GETBLOCKTXN, else, this condition is not coded empty tx_to_send')
 
@@ -550,7 +550,7 @@ def cmpctblock(block):
     for tx in block[BLOCK_TX]:
         cmpct_tx.append(tx)
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx,\
-           block[BLOCK_TTL], block[BLOCK_RECEIVED_TS], get_extra_tx_to_send(block[BLOCK_TX])
+           block[BLOCK_TTL], block[BLOCK_RECEIVED_TS]
 
 
 def get_cmpctblock(myself, block_id):
@@ -573,10 +573,6 @@ def build_cmpctblock(myself, block_and_tx):
             tx_created[tx][RECEIVED_BLOCKTX] += 1
 
     return cmpctblock
-
-
-def get_extra_tx_to_send(tx_array):
-    return []
 
 
 def get_block_header(block):
