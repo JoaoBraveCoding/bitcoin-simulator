@@ -1,7 +1,7 @@
 # system settings, mandatory
-NUMBER_OF_NODES : 100
-NUMBER_OF_MINERS: 2
-EXTRA_REPLICAS: 0
+NUMBER_OF_NODES : 6000
+NUMBER_OF_MINERS: 16
+EXTRA_REPLICAS: 3
 
 NUMBER_OF_BAD_MINERS: 0
 
@@ -10,7 +10,7 @@ TOP_NODES_SIZE: 1
 # number of simulation cycles
 # 10080 = 1 week with 1block ~= 10 cycles
 # 720 = 12h with 1block ~= 10 cycles
-NUMBER_OF_CYCLES : 60
+NUMBER_OF_CYCLES : 1440
 # duration of node cycle
 NODE_CYCLE: 1250
 
@@ -20,7 +20,7 @@ NUMB_TX_PER_CYCLE: 142
 NEIGHBOURHOOD_SIZE: 8
 
 TX_ARRAY: False
-EXPERT_LOG: False
+EXPERT_LOG: True
 
 MIN_TX_SIZE: 401
 MAX_TX_SIZE: 1498
