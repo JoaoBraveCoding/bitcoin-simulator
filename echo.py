@@ -74,20 +74,26 @@ def improve_performance(cycle):
         return
 
     for i in xrange(len(blocks_created)):
-        if blocks_created[i][BLOCK_HEIGHT] + 3 < highest_block and not isinstance(blocks_created[i][BLOCK_TX], int):
+        if blocks_created[i][BLOCK_HEIGHT] + 2 < highest_block and not isinstance(blocks_created[i][BLOCK_TX], int):
             for tx in blocks_created[i][BLOCK_TX]:
                 for myself in xrange(nb_nodes):
                     if tx in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
                         del nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][tx]
+                    if tx in nodeState[myself][NODE_MEMPOOL]:
+                        del nodeState[myself][NODE_MEMPOOL][tx]
 
                     for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX]:
                             del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_KNOWN_TX][tx]
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
                             del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND][tx]
+
             replace_block = list(blocks_created[i])
+            tx_list = replace_block[BLOCK_TX]
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
             blocks_created[i] = tuple(replace_block)
+            del replace_block
+            del tx_list
             gc.collect()
 
 
@@ -111,7 +117,7 @@ def CYCLE(myself):
     n = get_nb_of_tx_to_gen(myself, len(nodeState), nodeState[myself][CURRENT_CYCLE])
     while i < n:
         generate_new_tx(myself)
-        i = i + 1
+        i += 1
 
     # If the node can generate a block
     if nodeState[myself][NODE_TIME_TO_GEN] == -1:
@@ -205,7 +211,7 @@ def GETHEADERS(myself, source, get_headers):
 
     headers_to_send = []
     for id in get_headers:
-        block = get_block(id)
+        block = get_block(myself, id)
         if block is not None:
             headers_to_send.append(get_block_header(block))
         else:
@@ -261,7 +267,7 @@ def GETDATA(myself, source, requesting_data):
                 update_neighbourhood_inv(myself, source, TX_TYPE, tx)
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
-            block = get_block(inv[INV_CONTENT_ID])
+            block = get_block(myself, inv[INV_CONTENT_ID])
             if block is not None:
                 if block[BLOCK_GEN_NODE] != myself:
                     block = list(block)
@@ -341,7 +347,7 @@ def GETBLOCKTXN(myself, source, tx_request):
 
     # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
-    block = get_block(tx_request[0])
+    block = get_block(myself, tx_request[0])
     tx_to_send = []
     for tx in block[BLOCK_TX]:
         if tx in tx_request[1]:
@@ -418,14 +424,14 @@ def generate_new_block(myself):
     if nodeState[myself][NODE_CURRENT_BLOCK] is None:
         new_block = (block_id, -1, 0, nodeState[myself][CURRENT_CYCLE], myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
     else:
-        highest_blocke = nodeState[myself][NODE_CURRENT_BLOCK]
+        highest_blocke = get_block(myself, nodeState[myself][NODE_CURRENT_BLOCK])
         new_block = (block_id, highest_blocke[BLOCK_ID], highest_blocke[BLOCK_HEIGHT] + 1, nodeState[myself][CURRENT_CYCLE],
                      myself, tx_array, 0, nodeState[myself][CURRENT_CYCLE])
 
     # Store the new block
     blocks_created.append(new_block)
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = 0
-    nodeState[myself][NODE_CURRENT_BLOCK] = new_block
+    nodeState[myself][NODE_CURRENT_BLOCK] = new_block[BLOCK_ID]
     block_id += 1
     if new_block[BLOCK_HEIGHT] > highest_block:
         highest_block = new_block[BLOCK_HEIGHT]
@@ -438,7 +444,10 @@ def inc_tll(block):
     return tuple(lst)
 
 
-def get_block(block_id):
+def get_block(myself, block_id):
+    if not have_it(myself, BLOCK_TYPE, block_id):
+        raise ValueError("get_block I don't have id: {}".format(block_id))
+
     for item in reversed(blocks_created):
         if item[0] == block_id:
             return item
@@ -488,8 +497,8 @@ def process_block(myself, source, block):
     if not have_it(myself, BLOCK_TYPE, block[BLOCK_ID]):
         update_have_it(myself, BLOCK_TYPE, [block[BLOCK_ID], block[BLOCK_TTL]])
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
-                block[BLOCK_HEIGHT] > nodeState[myself][NODE_CURRENT_BLOCK][BLOCK_HEIGHT]:
-            nodeState[myself][NODE_CURRENT_BLOCK] = block
+                block[BLOCK_HEIGHT] > get_block(myself, nodeState[myself][NODE_CURRENT_BLOCK])[BLOCK_HEIGHT]:
+            nodeState[myself][NODE_CURRENT_BLOCK] = block[BLOCK_ID]
         next_t_to_gen(myself)
 
         # Remove tx from MEMPOOL and from vINV_TX_TO_SEND
@@ -673,16 +682,9 @@ def get_tx_in_block(block, tx_id):
 
 
 def get_nb_of_tx_to_gen(myself, size, cycle):
-    n = number_of_tx_to_gen_per_cycle//size
-
-    if n != 0:
-        tx_generated[cycle] += n
-        return n
-    else:
-        if myself in nodes_to_gen_tx[cycle]:
-            tx_generated[cycle] += 1
-            return 1
-        return 0
+    if myself in nodes_to_gen_tx[cycle]:
+        return 1
+    return 0
 
 
 def get_tx_to_block(myself):
@@ -696,10 +698,14 @@ def get_tx_to_block(myself):
             size += 700
             tx_array.append(tx)
             del nodeState[myself][NODE_MEMPOOL][tx]
+            for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
+                if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
+                    del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND][tx]
         elif size + min_tx_size > max_block_size:
             break
         else:
             continue
+    del list_to_iter
     return tx_array
 
 
@@ -1132,7 +1138,7 @@ def create_miner_replicas(neighbourhood_size):
 
 def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
-        number_of_tx_to_gen_per_cycle, tx_generated, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
+        number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
         total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
         number_of_bad_miners
@@ -1170,7 +1176,6 @@ def configure(config):
     number_of_tx_to_gen_per_cycle = config['NUMB_TX_PER_CYCLE']
     min_tx_size = int(config['MIN_TX_SIZE'])
     max_tx_size = int(config['MAX_TX_SIZE'])
-    tx_generated = [0] * nb_cycles
     blocks_mined_by_randoms = 0
     total_blocks_mined_by_randoms = (nb_cycles/10) * 0.052
 
