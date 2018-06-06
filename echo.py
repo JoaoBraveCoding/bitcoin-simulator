@@ -213,15 +213,12 @@ def INV(myself, source, vInv):
 def GETHEADERS(myself, source, get_headers):
     global nodeState
 
-    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-
     headers_to_send = []
     for id in get_headers:
         block = get_block(myself, id)
         if block is not None:
             headers_to_send.append(get_block_header(block))
         else:
-            # logger.info("Node {} Received header from {} INVALID ID in header!!!".format(myself, source))
             raise ValueError('GETHEADERS, else, node received invalid headerID')
 
     sim.send(HEADERS, source, myself, headers_to_send)
@@ -572,6 +569,8 @@ def build_cmpctblock(myself, block_and_tx):
         for tx in block_and_tx[1]:
             tx_created[tx][RECEIVED_BLOCKTX] += 1
 
+    nodeState[myself][NODE_PARTIAL_BLOCKS].remove(cmpctblock)
+
     return cmpctblock
 
 
@@ -601,6 +600,9 @@ def update_have_it(myself, type, id):
 
     if type == BLOCK_TYPE and id[INV_BLOCK_ID] not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
         nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][id[INV_BLOCK_ID]] = id[INV_BLOCK_TTL]
+        for partial_block in nodeState[myself][NODE_PARTIAL_BLOCKS]:
+            if partial_block[BLOCK_ID] == id[INV_BLOCK_ID]:
+                nodeState[myself][NODE_PARTIAL_BLOCKS].remove(partial_block)
     elif type == TX_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
         nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][id] = None
 
