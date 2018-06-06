@@ -182,6 +182,8 @@ def INV(myself, source, vInv):
 
             if (expert_log and 3600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 3600) or not expert_log:
                 nodeState[myself][MSGS][ALL_INVS][RECEIVED_INV] += 1
+                if myself == nb_nodes-1:
+                    special_n[0][0].append(inv[INV_CONTENT_ID])
             update_neighbourhood_inv(myself, source, TX_TYPE, inv[INV_CONTENT_ID])
             seen_tx = have_it(myself, TX_TYPE, inv[INV_CONTENT_ID])
             if not seen_tx and inv[INV_CONTENT_ID] not in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
@@ -189,6 +191,8 @@ def INV(myself, source, vInv):
                 nodeState[myself][NODE_TX_ALREADY_REQUESTED].append(inv[INV_CONTENT_ID])
                 if (expert_log and 3600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 3600) or not expert_log:
                     nodeState[myself][MSGS][ALL_INVS][RELEVANT_INV] += 1
+                    if myself == nb_nodes - 1:
+                        special_n[0][1].append(inv[INV_CONTENT_ID])
 
         elif inv[INV_TYPE] == BLOCK_TYPE:
             update_neighbourhood_inv(myself, source, BLOCK_TYPE, inv[INV_CONTENT_ID])
@@ -989,7 +993,13 @@ def wrapup():
     avg_entries_per_inv = sum_all_inv/sum_received_invs
     avg_entries_per_getdata = sum_all_getdata/sum_received_getdata
 
-    print(nodeState[nb_nodes-1][MSGS][ALL_INVS][RECEIVED_INV] / nodeState[nb_nodes-1][MSGS][ALL_INVS][RELEVANT_INV])
+    #print(special_n)
+    file_to_write = open('special_node.txt', 'w')
+    file_to_write.write("outbound {}\n".format(special_n[1]))
+    file_to_write.write("inbound {}\n".format(special_n[2]))
+    file_to_write.write("all invs {}\n".format(special_n[0][0]))
+    file_to_write.write("unique invs {}\n".format(special_n[0][1]))
+    file_to_write.close()
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
@@ -1062,6 +1072,8 @@ def create_special_node():
     n = nb_nodes
     random_nodes = random.sample(xrange(nb_nodes), 2)
     neighbourhood = random.sample(xrange(nb_nodes), 8)
+    special_n.append(neighbourhood)
+    special_n.append(random_nodes)
     for node in random_nodes:
         nodeState[node][NODE_NEIGHBOURHOOD].pop()
         nodeState[node][NODE_NEIGHBOURHOOD].append(n)
@@ -1159,14 +1171,14 @@ def configure(config):
         number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
         total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
-        number_of_bad_miners
+        number_of_bad_miners, special_n
 
 
     node_cycle = int(config['NODE_CYCLE'])
 
     nb_nodes = config['NUMBER_OF_NODES']
     neighbourhood_size = int(config['NEIGHBOURHOOD_SIZE'])
-
+    special_n = [[[], []]]
     if top_nodes != -1:
         if top_nodes == 0:
             hop_based_broadcast = False
