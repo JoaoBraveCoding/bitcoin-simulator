@@ -59,6 +59,8 @@ INV_BLOCK_ID, INV_BLOCK_TTL = 0, 1
 
 TIME, INBOUND = 0, 1
 
+TIME_COMMITED, COMMITED = 0, 1
+
 def init():
     # schedule execution for all nodes
     for nodeId in nodeState:
@@ -406,7 +408,7 @@ def next_t_to_gen(myself):
 
 
 def generate_new_block(myself):
-    global nodeState, block_id, blocks_created, highest_block
+    global nodeState, block_id, blocks_created, highest_block, tx_created_after_last_block
 
     # First block or
     # Not first block which means getting highest block to be the parent
@@ -423,6 +425,7 @@ def generate_new_block(myself):
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = 0
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block[BLOCK_ID]
     block_id += 1
+    tx_created_after_last_block = 0
     if new_block[BLOCK_HEIGHT] > highest_block:
         highest_block = new_block[BLOCK_HEIGHT]
     return new_block
@@ -650,7 +653,7 @@ def push_to_send(myself, id, mine):
 
 
 def generate_new_tx(myself):
-    global nodeState, tx_id
+    global nodeState, tx_id, tx_commit, tx_created_after_last_block
 
     new_tx = tx_id
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
@@ -659,6 +662,8 @@ def generate_new_tx(myself):
 
     if tx_array:
         tx_created.append([0, 0])
+    tx_commit.append([nodeState[myself][CURRENT_CYCLE], False])
+    tx_created_after_last_block += 1
     tx_id += 1
 
 
@@ -690,6 +695,10 @@ def get_tx_to_block(myself):
         if size + 700 <= max_block_size:
             size += 700
             tx_array.append(tx)
+            if not tx_commit[tx][COMMITED]:
+                created = tx_commit[tx][TIME_COMMITED]
+                tx_commit[tx][TIME_COMMITED] = nodeState[myself][CURRENT_CYCLE] - created
+                tx_commit[tx][COMMITED] = True
             del nodeState[myself][NODE_MEMPOOL][tx]
             for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
                 if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
@@ -716,9 +725,9 @@ def update_time_to_send(myself, target):
 
 def poisson_send(cycle, avg_inc):
     if avg_inc == 5:
-        return cycle + 5 * random.randrange(3, 5) # 70
+        return cycle + 5 * random.randrange(3, 5)
     else:
-        return cycle + 2.5* random.randrange(1, 5) # 70
+        return cycle + 2.5 * random.randrange(1, 5)
 
 
 def broadcast_invs(myself):
@@ -923,6 +932,28 @@ def get_avg_total_sent_msg():
     return total_sent/nb_nodes
 
 
+def get_nb_tx_added_to_blocks():
+    counter = 0
+    for tx in tx_commit:
+        if tx[COMMITED]:
+            counter += 1
+    return counter
+
+
+def get_nb_of_tx_gened():
+    return tx_id - tx_created_after_last_block - 1
+
+
+def get_avg_time_commited():
+    counter = 0
+    sum = 0
+    for tx in tx_commit:
+        if tx[COMMITED]:
+            sum += tx[TIME_COMMITED]
+            counter += 1
+    return sum/counter
+
+
 def wrapup():
     global nodeState
     #logger.info("Wrapping up")
@@ -988,6 +1019,19 @@ def wrapup():
     avg_entries_per_inv = sum_all_inv/sum_received_invs
     avg_entries_per_getdata = sum_all_getdata/sum_received_getdata
 
+    nb_tx_added_to_blocks = get_nb_tx_added_to_blocks()
+    nb_of_tx_gened = get_nb_of_tx_gened()
+    avg_time_commited = get_avg_time_commited()
+
+    data = []
+    for tx in tx_commit:
+        if tx[COMMITED]:
+            data.append(tx[TIME_COMMITED])
+
+    time_commited_CDF = utils.percentiles(data, percs=range(101), paired=False)
+
+    utils.dump_as_gnu_plot([time_commited_CDF], dumpPath + '/time_commited_CDF-' + str(runId) + '.gpData', ['time_commited'])
+
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
         csv_file_to_write = open('out/results.csv', 'w')
@@ -997,7 +1041,7 @@ def wrapup():
         spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad miners", "Avg inv", "Avg entries per inv",
                               "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
                               "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
-                              "Total number of branches", "Hops distribution"])
+                              "Total tx created", "Total tx added to blocks", "Avg commit time", "Total number of branches", "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
@@ -1007,13 +1051,13 @@ def wrapup():
                               sum_getData / nb_nodes,
                               avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
-                              avg_total_sent_msg, nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
+                              avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
     else:
         spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_miners, sum_inv / nb_nodes,
                               avg_entries_per_inv,
                               sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
-                              avg_duplicated_inv, avg_total_sent_msg, nb_forks,
+                              avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks,
                               ''.join(str(e) + " " for e in hops_distribution)])
     csv_file_to_write.flush()
     csv_file_to_write.close()
@@ -1137,7 +1181,7 @@ def configure(config):
         number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
         total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
-        number_of_bad_miners
+        number_of_bad_miners, tx_commit, tx_created_after_last_block
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1184,6 +1228,8 @@ def configure(config):
     highest_block = -1
     tx_id = 0
     tx_created = []
+    tx_commit = []
+    tx_created_after_last_block = 0
 
     values = []
     i = -1
@@ -1198,13 +1244,7 @@ def configure(config):
     if number_of_tx_to_gen_per_cycle//nb_nodes == 0:
         nodes_to_gen_tx = []
         for i in range(0, nb_cycles):
-            value = random.random()
-            if value < 0.3:
-                number_of_tx = number_of_tx_to_gen_per_cycle + 1
-            else:
-                number_of_tx = number_of_tx_to_gen_per_cycle
-
-            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes), number_of_tx))
+            nodes_to_gen_tx.append(random.sample(xrange(nb_nodes), number_of_tx_to_gen_per_cycle))
 
     IS_CHURN = config.get('CHURN', False)
     if IS_CHURN:
