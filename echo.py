@@ -40,6 +40,8 @@ NEIGHBOURHOOD_KNOWN_BLOCKS, NEIGHBOURHOOD_KNOWN_TX, NEIGHBOURHOOD_TX_TO_SEND = 0
 
 TOP_N_NODES, STATS = 0, 1
 
+STATS_T, STATS_T_1 = 0, 1
+
 TOTAL_TLL, TOTAL_MSG_RECEIVED = 0, 1
 
 INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG, MISSING_TX, \
@@ -60,6 +62,12 @@ INV_BLOCK_ID, INV_BLOCK_TTL = 0, 1
 TIME, INBOUND = 0, 1
 
 TIME_COMMITED, COMMITED = 0, 1
+
+TS_RECEIVED, TTL = 0, 1
+
+TIME_FRAME = 3600
+
+ALPHA = 0.3
 
 def init():
     # schedule execution for all nodes
@@ -92,7 +100,7 @@ def improve_performance(cycle):
                             del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND][tx]
 
             for myself in xrange(nb_nodes):
-                nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][i] = None
+                nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][i][TTL] = None
 
             replace_block = list(blocks_created[i])
             tx_list = replace_block[BLOCK_TX]
@@ -117,9 +125,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        output.flush()
-        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.flush()
+        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -282,7 +290,7 @@ def GETDATA(myself, source, requesting_data):
             if block is not None:
                 if block[BLOCK_GEN_NODE] != myself:
                     block = list(block)
-                    block[BLOCK_TTL] = nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][block[BLOCK_ID]] + 1
+                    block[BLOCK_TTL] = nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][block[BLOCK_ID]][TTL] + 1
                     block = tuple(block)
                 sim.send(BLOCK, source, myself, block)
                 if (expert_log and 3600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 3600) or not expert_log:
@@ -422,7 +430,7 @@ def generate_new_block(myself):
 
     # Store the new block
     blocks_created.append(new_block)
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = 0
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = [nodeState[myself][CURRENT_CYCLE], 0]
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block[BLOCK_ID]
     block_id += 1
     tx_created_after_last_block = 0
@@ -456,15 +464,54 @@ def super_get_block(block_id):
     return None
 
 
+def get_classification(myself, source, current_cycle):
+    t_blocks = []
+    t_1_blocks = []
+    for block in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].items():
+        if block[TS_RECEIVED] + TIME_FRAME > current_cycle:
+            t_blocks.append(block)
+        else:
+            t_1_blocks.append(block)
+
+    t_k = 0
+    t_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED]
+    for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
+        t_k += stat[0]
+    if t_n == 0:
+        t = 0
+    else:
+        t = (t_k/t_n) + len(t_blocks) - t_n
+
+    t_1_k = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]
+    t_1_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED]
+    if t_1_n == 0:
+        t_1 = 0
+    else:
+        t_1 = (t_1_k/t_1_n) + len(t_1_blocks) - t_1_n
+
+    return (1 - ALPHA) * t_1 + ALPHA * t
+
+
 def update_neighbour_statistics(myself, source, block_ttl):
-    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_TLL] += block_ttl
-    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_MSG_RECEIVED] += 1
-    total_ttl = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_TLL]
-    total_msg = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][TOTAL_MSG_RECEIVED]
-    update_top(myself, source, total_ttl/total_msg)
+    current_cycle = nodeState[myself][CURRENT_CYCLE]
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].append([block_ttl, current_cycle])
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] += 1
+    stats_to_remove = []
+    for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
+        if stat[1] + TIME_FRAME < current_cycle:
+            stats_to_remove.append(stat)
+    for stat in stats_to_remove:
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].remove(stat)
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] -= 1
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL] += stat[0]
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED] += 1
+
+    score = get_classification(myself, source, current_cycle)
+    update_top(myself, source, score)
 
 
 def update_top(myself, source, score):
+    current_cycle = nodeState[myself][CURRENT_CYCLE]
     if source in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return
 
@@ -477,9 +524,7 @@ def update_top(myself, source, score):
     worst_index = -1
     for i in range(0, len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES])):
         node = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][i]
-        total_ttl = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][node][TOTAL_TLL]
-        total_msg = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][node][TOTAL_MSG_RECEIVED]
-        member_score = total_ttl/total_msg
+        member_score = get_classification(myself, node, current_cycle)
         if member_score < score:
             continue
         elif member_score >= score and worst_score < member_score:
@@ -593,7 +638,7 @@ def update_have_it(myself, type, id):
         exit(-1)
 
     if type == BLOCK_TYPE and id[INV_BLOCK_ID] not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
-        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][id[INV_BLOCK_ID]] = id[INV_BLOCK_TTL]
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][id[INV_BLOCK_ID]] = [nodeState[myself][CURRENT_CYCLE], id[INV_BLOCK_TTL]]
         if id[INV_BLOCK_ID] in nodeState[myself][NODE_PARTIAL_BLOCKS]:
             nodeState[myself][NODE_PARTIAL_BLOCKS].remove(id[INV_BLOCK_ID])
     elif type == TX_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
@@ -829,7 +874,7 @@ def new_connection(myself, source):
     else:
         nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), defaultdict(), defaultdict()]
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [0, 0]
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [[[], 0], [0, 0]]
         nodeState[myself][NODE_TIME_TO_SEND][source] = [poisson_send(nodeState[myself][CURRENT_CYCLE], 5), True]
 
 
@@ -1041,7 +1086,8 @@ def wrapup():
         spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad miners", "Avg inv", "Avg entries per inv",
                               "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
                               "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
-                              "Total tx created", "Total tx added to blocks", "Avg commit time", "Total number of branches", "Hops distribution"])
+                              "Total tx created", "Total tx added to blocks", "Avg commit time", "Total number of branches",
+                              "Total blocks created", "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
@@ -1051,13 +1097,15 @@ def wrapup():
                               sum_getData / nb_nodes,
                               avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
-                              avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, ''.join(str(e) + " " for e in hops_distribution)])
+                              avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, block_id,
+                              ''.join(str(e) + " " for e in hops_distribution)])
     else:
         spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_miners, sum_inv / nb_nodes,
                               avg_entries_per_inv,
                               sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
-                              avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks,
+                              avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
+                              nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)])
     csv_file_to_write.flush()
     csv_file_to_write.close()
@@ -1131,7 +1179,7 @@ def createNode(neighbourhood):
     node_headers_requested = []
     for neighbour in neighbourhood:
         node_neighbourhood_inv[neighbour] = [SortedCollection(), defaultdict(), defaultdict()]
-        stats[neighbour] = [0, 0]
+        stats[neighbour] = [[[], 0], [0, 0]]
         time_to_send[neighbour] = [poisson_send(0, 2.5), False]
     node_neighbourhood_stats = [topx, stats]
 
