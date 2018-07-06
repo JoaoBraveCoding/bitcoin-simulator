@@ -183,8 +183,13 @@ def INV(myself, source, vInv):
 
     ask_for = []
     headers_to_request = []
+    tx_inv = False
     for inv in vInv:
         if inv[INV_TYPE] == TX_TYPE:
+            if not tx_inv and should_log(myself):
+                nodeState[myself][MSGS][INV_MSG][RECEIVED] += 1
+                tx_inv = True
+
             ask_for += process_tx_inv(myself, source, inv)
         elif inv[INV_TYPE] == BLOCK_TYPE:
             headers_to_request += process_block_inv(myself, source, inv)
@@ -371,7 +376,6 @@ def TX(myself, source, tx):
 def process_tx_inv(myself, source, inv):
     ask_for = []
     if should_log(myself):
-        nodeState[myself][MSGS][INV_MSG][RECEIVED] += 1
         nodeState[myself][MSGS][ALL_INVS][RECEIVED_INV] += 1
 
     update_neighbourhood_inv(myself, source, TX_TYPE, inv[INV_CONTENT_ID])
