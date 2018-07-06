@@ -1,31 +1,30 @@
-# system settings, mandatory
-NUMBER_OF_NODES : 625
-NUMBER_OF_MINERS: 5
+# Network type
+NUMBER_OF_NODES : 250
+NUMBER_OF_MINERS: 2
 EXTRA_REPLICAS: 0
-
-
 NUMBER_OF_BAD_MINERS: 0
-
-HOP_BASED_BROADCAST: False
-TOP_NODES_SIZE: 1
-# number of simulation cycles
-# 10080 = 1 week with 1block ~= 10 cycles
-# 720 = 12h with 1block ~= 10 cycles
-NUMBER_OF_CYCLES : 86400
-
-# duration of node cycle
-NODE_CYCLE: 1250
-
-#210000 #130 o de 650 no meu deixar a 142
-NUMB_TX_PER_CYCLE: 2
-
 NEIGHBOURHOOD_SIZE: 8
 
-TX_ARRAY: False
-EXPERT_LOG: True
+# Hop configurations
+HOP_BASED_BROADCAST: False
+TOP_NODES_SIZE: 1
 
+# Number of simulation cycles
+NUMBER_OF_CYCLES : 3600
+
+# Duration of node cycle
+NODE_CYCLE: 1250
+
+# Log configurations
+EXPERT_LOG: False
+
+# Transactions configurations
+NUMB_TX_PER_CYCLE: 2
 MIN_TX_SIZE: 401
 MAX_TX_SIZE: 1498
+TX_ARRAY: False
+
+# Block specifications
 MAX_BLOCK_SIZE: 1000000
 
 # system settings, optional
@@ -36,15 +35,6 @@ MAX_BLOCK_SIZE: 1000000
 # message loss in the interval [0,1[
 #MESSASE_LOSS: 0.0
 
-#application specific settings
-# prob of a block appearing in the next x minutes -> 1 - e^-(x/10)
-# probability of finding exactly k blocks in T minutes is P(K, T) = (T/10)^K * E^(-T/10) / K!
-
-#AVG of 250000 tx being generated atm
-# 250000/(24*6) ~=1,736
-# 250000/(24*12) ~= 868
-# 250000/(24*6*10) ~= 174
-# 250000/(24*6*20) ~= 87
 NODE_DRIFT: 0
 # link latency,
 # it can be a constant
