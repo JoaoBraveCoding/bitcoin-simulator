@@ -117,6 +117,16 @@ def improve_performance(cycle):
         del gc.garbage[:]
 
 
+def get_headers_to_send(myself, target, new_block):
+    current_block = get_block(myself, new_block[BLOCK_PARENT_ID])
+    headers_to_send = [get_block_header(new_block)]
+    while not check_availability(myself, target, BLOCK_TYPE, current_block[BLOCK_ID]):
+        headers_to_send = [get_block_header(current_block)] + headers_to_send
+        current_block = get_block(myself, current_block[BLOCK_PARENT_ID])
+
+    return headers_to_send
+
+
 def CYCLE(myself):
     global nodeState, blocks_mined_by_randoms
 
@@ -134,7 +144,7 @@ def CYCLE(myself):
 
     # If a node can generate transactions
     i = 0
-    n = get_nb_of_tx_to_gen(myself, len(nodeState), nodeState[myself][CURRENT_CYCLE])
+    n = get_nb_of_tx_to_gen(myself, nodeState[myself][CURRENT_CYCLE])
     while i < n:
         generate_new_tx(myself)
         i += 1
@@ -151,7 +161,7 @@ def CYCLE(myself):
                 blocks_mined_by_randoms += 1
             new_block = generate_new_block(myself)
 
-            # Check if can send as cmpct or send through inv
+            # Check if can send as compact or send through inv
             for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
                 if check_availability(myself, target, BLOCK_TYPE, new_block[BLOCK_PARENT_ID]):
                     sim.send(CMPCTBLOCK, target, myself, cmpctblock(new_block))
@@ -160,9 +170,8 @@ def CYCLE(myself):
                     update_neighbourhood_inv(myself, target, BLOCK_TYPE, new_block[BLOCK_ID])
 
                 else:
-                    vInv = [(BLOCK_TYPE, new_block[BLOCK_ID])]
-                    # TODO change this send header and inv of possible parents
-                    sim.send(INV, target, myself, vInv)
+                    msg_to_send = get_headers_to_send(myself, target, new_block)
+                    sim.send(HEADERS, target, myself, msg_to_send)
                     if should_log(myself):
                         nodeState[myself][MSGS][INV_MSG][SENT] += 1
             del new_block
@@ -189,7 +198,6 @@ def INV(myself, source, vInv):
             if not tx_inv and should_log(myself):
                 nodeState[myself][MSGS][INV_MSG][RECEIVED] += 1
                 tx_inv = True
-
             ask_for += process_tx_inv(myself, source, inv)
         elif inv[INV_TYPE] == BLOCK_TYPE:
             headers_to_request += process_block_inv(myself, source, inv)
@@ -232,7 +240,6 @@ def HEADERS(myself, source, headers):
     new_connection(myself, source)
 
     process_new_headers(myself, source, headers)
-    # TODO process_new_headers might return without doing anything check if we should also return
     data_to_request = get_data_to_request(myself, source)
     if len(data_to_request) <= 16:
         # If is a new block in the main chain try and direct fetch
@@ -242,7 +249,6 @@ def HEADERS(myself, source, headers):
         del data_to_request
     else:
         # Else rely on other means of download
-        # TODO Fix this case still don't know how it's done
         raise ValueError('HEADERS, else, this condition is not coded')
 
 
@@ -302,8 +308,6 @@ def CMPCTBLOCK(myself, source, cmpctblock):
 
     new_connection(myself, source)
 
-    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
-
     in_mem_cmpctblock = get_cmpctblock(myself, cmpctblock[BLOCK_ID])
     if have_it(myself, BLOCK_TYPE, cmpctblock[BLOCK_ID]) or in_mem_cmpctblock:
         update_neighbour_statistics(myself, source, cmpctblock[BLOCK_TTL])
@@ -355,8 +359,6 @@ def BLOCKTXN(myself, source, tx_requested):
 
 def TX(myself, source, tx):
     global nodeState
-
-    # logger.info("Node {} Received {} from {}".format(myself, msg1, source))
 
     if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
         nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
@@ -412,21 +414,23 @@ def process_new_headers(myself, source, headers):
             have_header = get_header(myself, header[HEADER_ID])
 
         seen_parent = have_it(myself, BLOCK_TYPE, header[HEADER_PARENT_ID])
+        have_parent_header = None
+        if not seen_parent:
+            have_parent_header = get_header(myself, header[HEADER_PARENT_ID])
+
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, header[HEADER_ID])
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, header[HEADER_PARENT_ID])
 
-        if not seen_parent and header[HEADER_PARENT_ID] != -1:
-            # TODO REFACTOR
-            #logger.info("Node {} Received a header with a parent that doesn't connect id={} THIS NEEDS TO BE CODED!!"
-            #            .format(myself, header[HEADER_PARENT_ID]))
-            headers_to_request = [header[HEADER_PARENT_ID], header[HEADER_ID]]
-            sim.send(GETHEADERS, source, myself, headers_to_request)
-            if should_log(myself):
-                nodeState[myself][MSGS][GETHEADERS_MSG] += 1
-            continue
+        if (not seen_parent or have_parent_header is None) and header[HEADER_PARENT_ID] != -1:
+            raise ValueError("process_new_headers Received a header with a parent that we don't have: {}"
+                             .format(header[HEADER_PARENT_ID]))
 
-        elif (seen_parent or header[HEADER_PARENT_ID] == -1) and (not seen_block and have_header is None):
+        elif (seen_parent or have_parent_header or header[HEADER_PARENT_ID] == -1) and (not seen_block and have_header is None):
             nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header[HEADER_ID])
+
+        else:
+            raise ValueError("process_new_headers else condition reached help!: {}"
+                             .format(header[HEADER_ID]))
 
 
 def get_data_to_request(myself, source):
@@ -706,8 +710,8 @@ def check_availability(myself, target, type, id):
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if (type == BLOCK_TYPE and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS]) or \
-            (type == TX_TYPE and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]):
+    if (type == BLOCK_TYPE and (id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_BLOCKS] or id == -1))\
+            or (type == TX_TYPE and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]):
         return True
     return False
 
@@ -750,7 +754,7 @@ def get_transaction(myself, tx_id):
     return None
 
 
-def get_nb_of_tx_to_gen(myself, size, cycle):
+def get_nb_of_tx_to_gen(myself, cycle):
     if myself in nodes_to_gen_tx[cycle]:
         return 1
     return 0
