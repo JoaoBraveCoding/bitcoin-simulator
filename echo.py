@@ -367,7 +367,7 @@ def TX(myself, source, tx):
     if not have_it(myself, TX_TYPE, tx):
         update_have_it(myself, TX_TYPE, tx)
         nodeState[myself][NODE_MEMPOOL][tx] = None
-        if myself not in bad_miners:
+        if myself not in bad_miners or myself in bad_miners and behaviour == 2:
             push_to_send(myself, tx, NOT_MINE)
         if tx_array:
             tx_created[tx][RECEIVE_TX] += 1
@@ -547,7 +547,13 @@ def process_block(myself, source, block):
             if target == source or check_availability(myself, target, BLOCK_TYPE, block[BLOCK_ID]):
                 continue
             elif check_availability(myself, target, BLOCK_TYPE, block[BLOCK_PARENT_ID]):
-                block_to_send = inc_tll(block)
+                if myself not in bad_miners or myself in bad_miners and behaviour == 1:
+                    block_to_send = inc_tll(block)
+                elif myself in bad_miners and (behaviour == 2 or behaviour == 3):
+                    block_to_send = set_tll(block, 0)
+                else:
+                    raise ValueError("process_block no matching node type with bad miners {} and behaviour {}"
+                                     .format(bad_miners, behaviour))
                 sim.send(CMPCTBLOCK, target, myself, cmpctblock(block_to_send))
                 if should_log(myself):
                     nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
@@ -641,6 +647,14 @@ def update_top(myself, source, score):
 def inc_tll(block):
     lst = list(block)
     lst[BLOCK_TTL] += 1
+    to_ret = tuple(lst)
+    del lst
+    return to_ret
+
+
+def set_tll(block, ttl):
+    lst = list(block)
+    lst[BLOCK_TTL] = ttl
     to_ret = tuple(lst)
     del lst
     return to_ret
@@ -1028,7 +1042,7 @@ def configure(config):
         number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
         total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
-        number_of_bad_miners, tx_commit, tx_created_after_last_block
+        number_of_bad_miners, tx_commit, tx_created_after_last_block, behaviour
 
 
     node_cycle = int(config['NODE_CYCLE'])
@@ -1047,10 +1061,12 @@ def configure(config):
             random_nodes_size = top_nodes
     else:
         top_nodes_size = int(config['TOP_NODES_SIZE'])
+        random_nodes_size = int(config['RANDOM_NODES_SIZE'])
         hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
 
     if number_of_bad_miners == 0:
         number_of_bad_miners = int(config['NUMBER_OF_BAD_MINERS'])
+        behaviour = int(config['BEHAVIOUR'])
 
     number_of_miners = int(config['NUMBER_OF_MINERS'])
     extra_replicas = int(config['EXTRA_REPLICAS'])
@@ -1391,6 +1407,7 @@ if __name__ == '__main__':
     file_name = ""
     results_name = "results"
     number_of_bad_miners = 0
+    behaviour = 0
     if len(sys.argv) > 3:
         i = 3
         while i < len(sys.argv):
@@ -1412,6 +1429,9 @@ if __name__ == '__main__':
                 early_push = sys.argv[i+1]
             elif sys.argv[i] == "-bm":
                 number_of_bad_miners = int(sys.argv[i+1])
+                behaviour = int(sys.argv[i+2])
+                i += 3
+                continue
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
