@@ -1,0 +1,118 @@
+# To be able to run this script run:
+# chmod 755 run.sh
+# run
+runId=1
+i=0
+numberPararelism=-1
+tn=0
+rn=0
+pids=()
+ep=False
+current_ep=False
+badNodes=0
+behaviour=0
+currentBadNodes=0
+
+
+if [ -z "$1" ]
+then
+  echo "Include number of times to run cycle"
+  exit -1
+fi
+if [ -z "$2" ]
+then
+  echo "Input filename"
+  exit -1
+fi
+if ! [ -z "$3" ]
+then
+  numberPararelism=$3
+fi
+if ! [ -z "$4" ]
+then
+  ep=$4
+fi
+
+if ! [ -z "$5" ]
+then
+  badNodes=$5
+  behaviour=$6
+fi
+
+
+if [ "$ep" = "False" ]
+then
+  (( cycles=$1*4-1))
+else
+  (( cycles=$1*4*2-1))
+fi
+
+if ! [ "$badNodes" -eq "0" ]
+then
+  (( cycles=cycles*2+1))
+  ((currentBadNodes=badNodes))
+fi
+
+
+filename=$2
+
+
+while [ "$i" -le "$cycles" ]
+do
+
+    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $currentBadNodes
+
+    if [ "$rn" -eq "1" ]
+    then
+      if ! [ "$currentBadNodes" -eq "0" ] 
+      then
+        ((currentBadNodes=0))
+      elif [ "$badNodes" -eq "0" ]
+      then
+        ((tn=tn-1))
+        ((rn=tn))
+      else
+        ((tn=tn-1))
+        ((rn=tn))
+        ((currentBadNodes=badNodes))
+      fi
+    else
+      if ! [ "$currentBadNodes" -eq "0" ] 
+      then
+        ((currentBadNodes=0))
+      elif [ "$badNodes" -eq "0" ]
+      then
+        ((rn=1))
+      else
+        ((rn=1))
+        ((currentBadNodes=badNodes))
+      fi
+    fi
+
+    if [ "$tn" -eq "-1" ] || [ "$rn" -eq "1" ] && [ "$tn" -eq "0" ]
+    then
+      if [ "$ep" = "True" ]
+      then  
+        if  [ "$current_ep" = "False" ]
+        then
+          current_ep=True
+        else
+          current_ep=False
+        fi
+      fi
+      ((tn=2))
+      ((rn=2))
+    fi
+
+    if [ "$numberPararelism" -eq "0" ] 
+    then
+      for pid in ${pids[*]}; do
+        wait $pid
+        ((numberPararelism=numberPararelism+1))
+      done
+      pids=()
+    fi
+
+    (( runId=runId+1 ))
+    (( i=i+1 ))
+done

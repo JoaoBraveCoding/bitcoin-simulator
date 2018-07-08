@@ -753,7 +753,8 @@ def generate_new_tx(myself):
     new_tx = tx_id
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
     nodeState[myself][NODE_MEMPOOL][new_tx] = None
-    push_to_send(myself, new_tx, MINE)
+    if myself not in bad_miners or myself in bad_miners and behaviour == 2:
+        push_to_send(myself, new_tx, MINE)
 
     if tx_array:
         tx_created.append([0, 0])
