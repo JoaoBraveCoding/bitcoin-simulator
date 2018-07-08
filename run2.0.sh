@@ -11,7 +11,6 @@ ep=False
 current_ep=False
 badNodes=0
 behaviour=0
-currentBadNodes=0
 
 
 if [ -z "$1" ]
@@ -47,46 +46,20 @@ else
   (( cycles=$1*4*2-1))
 fi
 
-if ! [ "$badNodes" -eq "0" ]
-then
-  (( cycles=cycles*2+1))
-  ((currentBadNodes=badNodes))
-fi
-
-
 filename=$2
 
 
 while [ "$i" -le "$cycles" ]
 do
 
-    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $currentBadNodes
+    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes -bh $behaviour
 
     if [ "$rn" -eq "1" ]
     then
-      if ! [ "$currentBadNodes" -eq "0" ] 
-      then
-        ((currentBadNodes=0))
-      elif [ "$badNodes" -eq "0" ]
-      then
-        ((tn=tn-1))
-        ((rn=tn))
-      else
-        ((tn=tn-1))
-        ((rn=tn))
-        ((currentBadNodes=badNodes))
-      fi
+      ((tn=tn-1))
+      ((rn=tn))
     else
-      if ! [ "$currentBadNodes" -eq "0" ] 
-      then
-        ((currentBadNodes=0))
-      elif [ "$badNodes" -eq "0" ]
-      then
-        ((rn=1))
-      else
-        ((rn=1))
-        ((currentBadNodes=badNodes))
-      fi
+      ((rn=1))
     fi
 
     if [ "$tn" -eq "-1" ] || [ "$rn" -eq "1" ] && [ "$tn" -eq "0" ]
