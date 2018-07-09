@@ -54,6 +54,27 @@ do
 
     echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes -bh $behaviour
 
+    if [ "$numberPararelism" -eq "-1" ]
+    then
+      if [ "$runId" -eq "1" ]
+      then
+        pypy echo.py conf_echo/ $runId -sn True
+      else
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes $behaviour
+      fi
+    else
+      if [ "$runId" -eq "1" ]
+      then
+        pypy echo.py conf_echo/ $runId -sn True &
+        pids[$runId]=$!
+        sleep 10 
+      else
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes $behaviour & 
+        pids[$runId]=$!
+      fi
+      ((numberPararelism=numberPararelism-1))
+    fi
+
     if [ "$rn" -eq "1" ]
     then
       ((tn=tn-1))
