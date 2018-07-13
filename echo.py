@@ -23,8 +23,8 @@ import utils
 from sortedList import SortedCollection
 
 # Messages structures
-BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_TTL, BLOCK_RECEIVED_TS \
-    = 0, 1, 2, 3, 4, 5, 6, 7
+BLOCK_ID, BLOCK_PARENT_ID, BLOCK_HEIGHT, BLOCK_TIMESTAMP, BLOCK_GEN_NODE, BLOCK_TX, BLOCK_RECEIVED_TS \
+    = 0, 1, 2, 3, 4, 5, 6
 
 INV_TYPE, INV_CONTENT_ID = 0, 1
 
@@ -102,9 +102,6 @@ def improve_performance(cycle):
                         if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
                             del nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND][tx]
 
-            for myself in xrange(nb_nodes):
-                nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][i][TTL] = None
-
             replace_block = list(blocks_created[i])
             tx_list = replace_block[BLOCK_TX]
             replace_block[BLOCK_TX] = len(replace_block[BLOCK_TX])
@@ -138,9 +135,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        output.flush()
-        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.flush()
+        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -275,10 +272,6 @@ def GETDATA(myself, source, requesting_data):
         elif inv[INV_TYPE] == BLOCK_TYPE:
             block = get_block(myself, inv[INV_CONTENT_ID])
             if block is not None:
-                if block[BLOCK_GEN_NODE] != myself:
-                    block = list(block)
-                    block[BLOCK_TTL] = nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][block[BLOCK_ID]][TTL] + 1
-                    block = tuple(block)
                 sim.send(BLOCK, source, myself, block)
                 if should_log(myself):
                     nodeState[myself][MSGS][BLOCK_MSG] += 1
@@ -310,7 +303,7 @@ def CMPCTBLOCK(myself, source, cmpctblock):
 
     in_mem_cmpctblock = get_cmpctblock(myself, cmpctblock[BLOCK_ID])
     if have_it(myself, BLOCK_TYPE, cmpctblock[BLOCK_ID]) or in_mem_cmpctblock:
-        update_neighbour_statistics(myself, source, cmpctblock[BLOCK_TTL])
+        update_neighbour_statistics(myself, source)
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, cmpctblock[BLOCK_ID])
         return
 
@@ -501,7 +494,7 @@ def cmpctblock(block):
     for tx in block[BLOCK_TX]:
         cmpct_tx.append(tx)
     return block[BLOCK_ID], block[BLOCK_PARENT_ID], block[BLOCK_HEIGHT], block[BLOCK_TIMESTAMP], block[BLOCK_GEN_NODE], cmpct_tx,\
-           block[BLOCK_TTL], block[BLOCK_RECEIVED_TS]
+           block[BLOCK_RECEIVED_TS]
 
 
 def get_cmpctblock(myself, block_id):
@@ -531,7 +524,7 @@ def process_block(myself, source, block):
 
     # Check if it's a new block
     if not have_it(myself, BLOCK_TYPE, block[BLOCK_ID]):
-        update_have_it(myself, BLOCK_TYPE, [block[BLOCK_ID], block[BLOCK_TTL]])
+        update_have_it(myself, BLOCK_TYPE, block[BLOCK_ID])
         if nodeState[myself][NODE_CURRENT_BLOCK] is None or \
                 block[BLOCK_HEIGHT] > get_block(myself, nodeState[myself][NODE_CURRENT_BLOCK])[BLOCK_HEIGHT]:
             nodeState[myself][NODE_CURRENT_BLOCK] = block[BLOCK_ID]
@@ -541,36 +534,55 @@ def process_block(myself, source, block):
         update_tx(myself, block)
 
         # Broadcast new block
-        update_neighbour_statistics(myself, source, block[BLOCK_TTL])
+        update_neighbour_statistics(myself, source)
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, block[BLOCK_ID])
         for target in nodeState[myself][NODE_NEIGHBOURHOOD]:
             if target == source or check_availability(myself, target, BLOCK_TYPE, block[BLOCK_ID]):
                 continue
             elif check_availability(myself, target, BLOCK_TYPE, block[BLOCK_PARENT_ID]):
-                if myself not in bad_miners or myself in bad_miners and behaviour == 1:
-                    block_to_send = inc_tll(block)
-                elif myself in bad_miners and (behaviour == 2 or behaviour == 3):
-                    block_to_send = set_tll(block, 0)
-                else:
-                    raise ValueError("process_block no matching node type with bad miners {} and behaviour {}"
-                                     .format(bad_miners, behaviour))
-                sim.send(CMPCTBLOCK, target, myself, cmpctblock(block_to_send))
+                sim.send(CMPCTBLOCK, target, myself, cmpctblock(block))
                 if should_log(myself):
                     nodeState[myself][MSGS][CMPCTBLOCK_MSG] += 1
-                update_neighbourhood_inv(myself, target, BLOCK_TYPE, block_to_send[BLOCK_ID])
+                update_neighbourhood_inv(myself, target, BLOCK_TYPE, block[BLOCK_ID])
             else:
                 sim.send(HEADERS, target, myself, [get_block_header(block)])
                 if should_log(myself):
                     nodeState[myself][MSGS][HEADERS_MSG] += 1
 
     else:
-        update_neighbour_statistics(myself, source, block[BLOCK_TTL])
+        update_neighbour_statistics(myself, source)
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, block[BLOCK_ID])
 # --------------------------------------
 
 
 # --------------------------------------
 # Algorithm related functions
+def update_neighbour_statistics(myself, source):
+    current_cycle = nodeState[myself][CURRENT_CYCLE]
+    if nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
+
+        time_frame = current_cycle - nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL][-1][1]
+    elif nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]:
+        time_frame = current_cycle - TIME_FRAME
+    else:
+        time_frame = current_cycle
+
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].append([time_frame, current_cycle])
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] += 1
+    stats_to_remove = []
+    for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
+        if stat[1] + TIME_FRAME < current_cycle:
+            stats_to_remove.append(stat)
+    for stat in stats_to_remove:
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].remove(stat)
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] -= 1
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL] += stat[0]
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED] += 1
+
+    score = get_classification(myself, source, current_cycle)
+    update_top(myself, source, score)
+
+
 def get_classification(myself, source, current_cycle):
     t_blocks = []
     t_1_blocks = []
@@ -599,24 +611,6 @@ def get_classification(myself, source, current_cycle):
     return (1 - ALPHA) * t_1 + ALPHA * t
 
 
-def update_neighbour_statistics(myself, source, block_ttl):
-    current_cycle = nodeState[myself][CURRENT_CYCLE]
-    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].append([block_ttl, current_cycle])
-    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] += 1
-    stats_to_remove = []
-    for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
-        if stat[1] + TIME_FRAME < current_cycle:
-            stats_to_remove.append(stat)
-    for stat in stats_to_remove:
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].remove(stat)
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] -= 1
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL] += stat[0]
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED] += 1
-
-    score = get_classification(myself, source, current_cycle)
-    update_top(myself, source, score)
-
-
 def update_top(myself, source, score):
     current_cycle = nodeState[myself][CURRENT_CYCLE]
     if source in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
@@ -642,22 +636,6 @@ def update_top(myself, source, score):
 
     if worst_index != -1:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
-
-
-def inc_tll(block):
-    lst = list(block)
-    lst[BLOCK_TTL] += 1
-    to_ret = tuple(lst)
-    del lst
-    return to_ret
-
-
-def set_tll(block, ttl):
-    lst = list(block)
-    lst[BLOCK_TTL] = ttl
-    to_ret = tuple(lst)
-    del lst
-    return to_ret
 # --------------------------------------
 
 
@@ -683,10 +661,10 @@ def update_have_it(myself, type, id):
         print("check_availability strange type {}".format(type))
         exit(-1)
 
-    if type == BLOCK_TYPE and id[INV_BLOCK_ID] not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
-        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][id[INV_BLOCK_ID]] = [nodeState[myself][CURRENT_CYCLE], id[INV_BLOCK_TTL]]
-        if id[INV_BLOCK_ID] in nodeState[myself][NODE_PARTIAL_BLOCKS]:
-            nodeState[myself][NODE_PARTIAL_BLOCKS].remove(id[INV_BLOCK_ID])
+    if type == BLOCK_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS]:
+        nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][id] = nodeState[myself][CURRENT_CYCLE]
+        if id in nodeState[myself][NODE_PARTIAL_BLOCKS]:
+            nodeState[myself][NODE_PARTIAL_BLOCKS].remove(id)
     elif type == TX_TYPE and id not in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
         nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][id] = None
 
