@@ -360,7 +360,7 @@ def TX(myself, source, tx):
     if not have_it(myself, TX_TYPE, tx):
         update_have_it(myself, TX_TYPE, tx)
         nodeState[myself][NODE_MEMPOOL][tx] = None
-        if myself not in bad_miners or myself in bad_miners and behaviour == 2:
+        if myself not in bad_miners:
             push_to_send(myself, tx, NOT_MINE)
         if tx_array:
             tx_created[tx][RECEIVE_TX] += 1
@@ -731,7 +731,7 @@ def generate_new_tx(myself):
     new_tx = tx_id
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
     nodeState[myself][NODE_MEMPOOL][new_tx] = None
-    if myself not in bad_miners or myself in bad_miners and behaviour == 2:
+    if myself not in bad_miners:
         push_to_send(myself, new_tx, MINE)
 
     if tx_array:
@@ -1013,7 +1013,7 @@ def create_miner_replicas(neighbourhood_size):
 def create_bad_miner():
     global bad_miners
 
-    bad_miners = random.sample(miners, number_of_bad_miners)
+    bad_miners = random.sample(nb_nodes, (number_of_bad_miners/100) * nb_nodes)
 
 
 def configure(config):
@@ -1021,8 +1021,7 @@ def configure(config):
         number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
         total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
-        number_of_bad_miners, tx_commit, tx_created_after_last_block, behaviour
-
+        number_of_bad_miners, tx_commit, tx_created_after_last_block
 
     node_cycle = int(config['NODE_CYCLE'])
 
@@ -1045,7 +1044,6 @@ def configure(config):
 
     if number_of_bad_miners == 0:
         number_of_bad_miners = int(config['NUMBER_OF_BAD_MINERS'])
-        behaviour = int(config['BEHAVIOUR'])
 
     number_of_miners = int(config['NUMBER_OF_MINERS'])
     extra_replicas = int(config['EXTRA_REPLICAS'])
@@ -1239,8 +1237,6 @@ def get_avg_time_commited():
 
 def wrapup():
     global nodeState
-    #logger.info("Wrapping up")
-    #logger.info(nodeState)
 
     inv_messages = map(lambda x: nodeState[x][MSGS][INV_MSG], nodeState)
     getheaders_messages = map(lambda x: nodeState[x][MSGS][GETHEADERS_MSG], nodeState)
@@ -1386,7 +1382,6 @@ if __name__ == '__main__':
     file_name = ""
     results_name = "results"
     number_of_bad_miners = 0
-    behaviour = 0
     if len(sys.argv) > 3:
         i = 3
         while i < len(sys.argv):
@@ -1408,9 +1403,6 @@ if __name__ == '__main__':
                 early_push = sys.argv[i+1]
             elif sys.argv[i] == "-bm":
                 number_of_bad_miners = int(sys.argv[i+1])
-                behaviour = int(sys.argv[i+2])
-                i += 3
-                continue
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
