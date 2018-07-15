@@ -135,9 +135,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        #output.flush()
-        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.flush()
+        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -360,7 +360,7 @@ def TX(myself, source, tx):
     if not have_it(myself, TX_TYPE, tx):
         update_have_it(myself, TX_TYPE, tx)
         nodeState[myself][NODE_MEMPOOL][tx] = None
-        if myself not in bad_miners:
+        if myself not in bad_nodes:
             push_to_send(myself, tx, NOT_MINE)
         if tx_array:
             tx_created[tx][RECEIVE_TX] += 1
@@ -415,8 +415,10 @@ def process_new_headers(myself, source, headers):
         update_neighbourhood_inv(myself, source, BLOCK_TYPE, header[HEADER_PARENT_ID])
 
         if (not seen_parent or have_parent_header is None) and header[HEADER_PARENT_ID] != -1:
-            raise ValueError("process_new_headers Received a header with a parent that we don't have: {}"
-                             .format(header[HEADER_PARENT_ID]))
+            nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header[HEADER_PARENT_ID])
+            nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header[HEADER_ID])
+            #raise ValueError("process_new_headers Received a header with a parent that we don't have: {}"
+            #                .format(header[HEADER_PARENT_ID]))
 
         elif (seen_parent or have_parent_header or header[HEADER_PARENT_ID] == -1) and (not seen_block and have_header is None):
             nodeState[myself][NODE_HEADERS_TO_REQUEST].append(header[HEADER_ID])
@@ -731,7 +733,7 @@ def generate_new_tx(myself):
     new_tx = tx_id
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
     nodeState[myself][NODE_MEMPOOL][new_tx] = None
-    if myself not in bad_miners:
+    if myself not in bad_nodes:
         push_to_send(myself, new_tx, MINE)
 
     if tx_array:
@@ -929,11 +931,11 @@ def save_network():
         for n in xrange(nb_nodes):
             file_to_write.write(str(nodeState[n][NODE_NEIGHBOURHOOD]) + '\n')
         file_to_write.write(str(miners) + '\n')
-        file_to_write.write(str(bad_miners) + '\n')
+        file_to_write.write(str(bad_nodes) + '\n')
 
 
 def load_network(filename):
-    global nodeState, nb_nodes, number_of_miners, extra_replicas, miners, bad_miners
+    global nodeState, nb_nodes, number_of_miners, extra_replicas, miners, bad_nodes
 
     if filename == "":
         raise ValueError("No file named inputted in not create new run")
@@ -946,7 +948,7 @@ def load_network(filename):
         for n in xrange(nb_nodes):
             nodeState[n] = createNode(ast.literal_eval(file_to_read.readline()))
         miners = ast.literal_eval(file_to_read.readline())
-        bad_miners = ast.literal_eval(file_to_read.readline())
+        bad_nodes = ast.literal_eval(file_to_read.readline())
 
 
 def createNode(neighbourhood):
@@ -1011,17 +1013,17 @@ def create_miner_replicas(neighbourhood_size):
 
 
 def create_bad_miner():
-    global bad_miners
+    global bad_nodes
 
-    bad_miners = random.sample(nb_nodes, (number_of_bad_miners/100) * nb_nodes)
+    bad_nodes = random.sample(xrange(nb_nodes), int((number_of_bad_nodes/100) * nb_nodes))
 
 
 def configure(config):
     global nb_nodes, nb_cycles, nodeState, node_cycle, block_id, tx_id, \
         number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
-        total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_miners, \
-        number_of_bad_miners, tx_commit, tx_created_after_last_block
+        total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_nodes, \
+        number_of_bad_nodes, tx_commit, tx_created_after_last_block
 
     node_cycle = int(config['NODE_CYCLE'])
 
@@ -1042,8 +1044,8 @@ def configure(config):
         random_nodes_size = int(config['RANDOM_NODES_SIZE'])
         hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
 
-    if number_of_bad_miners == 0:
-        number_of_bad_miners = int(config['NUMBER_OF_BAD_MINERS'])
+    if number_of_bad_nodes == 0:
+        number_of_bad_nodes = int(config['NUMBER_OF_BAD_NODES'])
 
     number_of_miners = int(config['NUMBER_OF_MINERS'])
     extra_replicas = int(config['EXTRA_REPLICAS'])
@@ -1317,7 +1319,7 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
-        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad miners", "Avg inv", "Avg entries per inv",
+        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad nodes", "Avg inv", "Avg entries per inv",
                               "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
                               "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
                               "Total tx created", "Total tx added to blocks", "Avg commit time", "Total number of branches",
@@ -1327,14 +1329,14 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
-        spam_writer.writerow(["False", "False", early_push, number_of_bad_miners, sum_inv / nb_nodes, avg_entries_per_inv,
+        spam_writer.writerow(["False", "False", early_push, number_of_bad_nodes, sum_inv / nb_nodes, avg_entries_per_inv,
                               sum_getData / nb_nodes,
                               avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
                               avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)])
     else:
-        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_miners, sum_inv / nb_nodes,
+        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, sum_inv / nb_nodes,
                               avg_entries_per_inv,
                               sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
@@ -1381,7 +1383,7 @@ if __name__ == '__main__':
     save_network_connections = False
     file_name = ""
     results_name = "results"
-    number_of_bad_miners = 0
+    number_of_bad_nodes = 0
     if len(sys.argv) > 3:
         i = 3
         while i < len(sys.argv):
@@ -1401,8 +1403,8 @@ if __name__ == '__main__':
                 results_name = sys.argv[i+1]
             elif sys.argv[i] == "-ep":
                 early_push = sys.argv[i+1]
-            elif sys.argv[i] == "-bm":
-                number_of_bad_miners = int(sys.argv[i+1])
+            elif sys.argv[i] == "-bn":
+                number_of_bad_nodes = int(sys.argv[i+1])
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
