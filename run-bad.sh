@@ -11,10 +11,8 @@ increment=5
 current_tn=0
 current_rn=0
 current_bn=0
+pypy=/usr/local/Cellar/pypy/5.10.0_1/bin/pypy
 
-function quit {
-   exit
-}
 
 if [ -z "$1" ]
 then
@@ -54,24 +52,24 @@ rn=$5
 while [ "$i" -le $(( $cycles*2 )) ]
 do
 
-    echo run: $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn $0
+    echo run: $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0
 
     if [ "$numberPararelism" -eq "-1" ]
     then
       if [ "$runId" -eq "1" ]
       then
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0 -sn True
+        sudo $pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0 -sn True
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0
+        sudo $pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0
       fi
     else
       if [ "$runId" -eq "1" ]
       then
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0 -sn True &
+        sudo $pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0 -sn True &
         pids[$runId]=$!
         sleep 10 
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0 & 
+        sudo $pypy echo.py conf_echo/ $runId -ln $filename -tn $current_tn -rn $current_rn -ep $current_ep -bn 0 & 
         pids[$runId]=$!
       fi
       ((numberPararelism=numberPararelism-1))
@@ -105,9 +103,9 @@ do
 
     if [ "$numberPararelism" -eq "-1" ]
     then
-      pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodesS
+      sudo $pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodesS
     else
-      pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodesS & 
+      sudo $pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodesS & 
       pids[$runId]=$!
       ((numberPararelism=numberPararelism-1))
     fi

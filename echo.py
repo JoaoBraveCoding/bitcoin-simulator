@@ -1295,10 +1295,17 @@ def wrapup():
     avg_tx_per_block = get_avg_tx_per_block()
     avg_total_sent_msg = get_avg_total_sent_msg()
     # ---------
-    avg_duplicated_inv = sum_all_inv/sum_relevant_inv
+    if sum_all_inv == 0:
+        avg_duplicated_inv = 0
+        avg_entries_per_inv = 0
+    else:
+        avg_duplicated_inv = sum_all_inv/sum_relevant_inv
+        avg_entries_per_inv = sum_all_inv/sum_received_invs
     # ---------
-    avg_entries_per_inv = sum_all_inv/sum_received_invs
-    avg_entries_per_getdata = sum_all_getdata/sum_received_getdata
+    if sum_all_getdata == 0:
+        avg_entries_per_getdata = 0
+    else:
+        avg_entries_per_getdata = sum_all_getdata/sum_received_getdata
 
     nb_tx_added_to_blocks = get_nb_tx_added_to_blocks()
     nb_of_tx_gened = get_nb_of_tx_gened()
