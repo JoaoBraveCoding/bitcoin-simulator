@@ -182,7 +182,7 @@ def CYCLE(myself):
             del new_block
 
     # Send new transactions either created or received
-    if hop_based_broadcast:
+    if hop_based_broadcast and timer_solution:
         update_timer(myself, nodeState[myself][CURRENT_CYCLE])
     broadcast_invs(myself)
 
@@ -606,19 +606,31 @@ def get_classification(myself, source, current_cycle):
 
     t_k = 0
     t_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED]
+    timer_k = 0
+    timer_n = 0
+    for tx in nodeState[myself][NODE_TX_TIMER][source][TIMER_T]:
+        if nodeState[myself][NODE_TX_TIMER][source][TIMER_T][tx][TX_T_TIMER]:
+            timer_n += 1
+            timer_k += nodeState[myself][NODE_TX_TIMER][source][TIMER_T][tx][TX_T_TIMER]
     for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
         t_k += stat[0]
     if t_n == 0:
         t = 0
+    elif timer_k:
+        t = (t_k / t_n) + len(t_blocks) - t_n
     else:
-        t = (t_k/t_n) + len(t_blocks) - t_n
+        t = (t_k/t_n) + len(t_blocks) - t_n + (timer_k/timer_n)
 
     t_1_k = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]
     t_1_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED]
+    timer_1_k = nodeState[myself][NODE_TX_TIMER][source][TIMER_T_1][TOTAL_TIME]
+    timer_1_n = nodeState[myself][NODE_TX_TIMER][source][TIMER_T_1][TOTAL_SENT]
     if t_1_n == 0:
         t_1 = 0
+    elif timer_1_k == 0:
+        t_1 = (t_1_k / t_1_n) + len(t_1_blocks) - t_1_n
     else:
-        t_1 = (t_1_k/t_1_n) + len(t_1_blocks) - t_1_n
+        t_1 = (t_1_k/t_1_n) + len(t_1_blocks) - t_1_n + (timer_1_k/timer_1_n)
 
     return (1 - ALPHA) * t_1 + ALPHA * t
 
@@ -846,7 +858,7 @@ def broadcast_invs(myself):
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
                     update_neighbourhood_inv(myself, target, TX_TYPE, tx)
-                    if hop_based_broadcast:
+                    if hop_based_broadcast and timer_solution:
                         set_timer(myself, target, tx, current_cycle)
                     counter += 1
             del copy
@@ -929,7 +941,7 @@ def update_tx(myself, block):
         if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
-        if hop_based_broadcast:
+        if hop_based_broadcast and timer_solution:
             mark_tx_as_received(myself, tx)
 
 
@@ -1070,7 +1082,7 @@ def configure(config):
         number_of_tx_to_gen_per_cycle, max_block_size, min_tx_size, max_tx_size, values, nodes_to_gen_tx, miners, \
         top_nodes_size, hop_based_broadcast, number_of_miners, extra_replicas, blocks_created, blocks_mined_by_randoms, \
         total_blocks_mined_by_randoms, highest_block, random_nodes_size, tx_created, tx_array, expert_log, bad_nodes, \
-        number_of_bad_nodes, tx_commit, tx_created_after_last_block
+        number_of_bad_nodes, tx_commit, tx_created_after_last_block, timer_solution
 
     node_cycle = int(config['NODE_CYCLE'])
 
@@ -1090,6 +1102,7 @@ def configure(config):
         top_nodes_size = int(config['TOP_NODES_SIZE'])
         random_nodes_size = int(config['RANDOM_NODES_SIZE'])
         hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
+        timer_solution = bool('TIMER_SOLUTION')
 
     if number_of_bad_nodes == 0:
         number_of_bad_nodes = int(config['NUMBER_OF_BAD_NODES'])
@@ -1456,6 +1469,7 @@ if __name__ == '__main__':
     file_name = ""
     results_name = "results"
     number_of_bad_nodes = 0
+    timer_solution = False
     if len(sys.argv) > 3:
         i = 3
         while i < len(sys.argv):
@@ -1477,6 +1491,8 @@ if __name__ == '__main__':
                 early_push = sys.argv[i+1]
             elif sys.argv[i] == "-bn":
                 number_of_bad_nodes = int(sys.argv[i+1])
+            elif sys.argv[i] == "-ts":
+                timer_solution = int(sys.argv[i+1])
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
