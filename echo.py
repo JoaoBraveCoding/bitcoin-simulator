@@ -33,7 +33,7 @@ HEADER_ID, HEADER_PARENT_ID = 0, 1
 # Node structure
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, NODE_BLOCKS_ALREADY_REQUESTED, \
 NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, NODE_NEIGHBOURHOOD_STATS, MSGS, \
-NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
@@ -67,9 +67,17 @@ TIME_COMMITED, COMMITED = 0, 1
 
 TS_RECEIVED, TTL = 0, 1
 
+TX_T_TIMER, TX_T_CYCLE_RECEIVED, TX_T_ADDED = 0, 1, 2
+
+NOT_SAMPLED, TIMER_T, TIMER_T_1 = 0, 1, 2
+
+TOTAL_TIME, TOTAL_SENT = 0, 1
+
 TIME_FRAME = 14400
 
 ALPHA = 0.3
+
+SAMPLE_SIZE = 100
 
 
 def init():
@@ -135,9 +143,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        output.flush()
-        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #utput.flush()
+        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -174,6 +182,8 @@ def CYCLE(myself):
             del new_block
 
     # Send new transactions either created or received
+    if hop_based_broadcast:
+        update_timer(myself, nodeState[myself][CURRENT_CYCLE])
     broadcast_invs(myself)
 
     nodeState[myself][CURRENT_CYCLE] += 1
@@ -641,24 +651,32 @@ def update_top(myself, source, score):
 
 
 def set_timer(myself, target, id, current_cycle):
-    nodeState[myself][NODE_TX_TIMER][target][STATS_T][id] = [current_cycle, current_cycle, False]
+    if nodeState[myself][NODE_TX_TIMER][target][NOT_SAMPLED] > SAMPLE_SIZE:
+        nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id] = [current_cycle, current_cycle, False]
+        nodeState[myself][NODE_TX_TIMER][target][NOT_SAMPLED] = 0
+    else:
+        nodeState[myself][NODE_TX_TIMER][target][NOT_SAMPLED] += 1
 
 
 def update_timer(myself, current_cycle):
     for target in nodeState[myself][NODE_TX_TIMER]:
-        list_to_iter = list(nodeState[myself][NODE_TX_TIMER][target][STATS_T])
+        list_to_iter = dict(nodeState[myself][NODE_TX_TIMER][target][TIMER_T])
         for id in list_to_iter:
-            if id[TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle:
-                nodeState[myself][NODE_TX_TIMER][target][STATS_T_1][TOTAL_TIME] += id[TX_T_TIMER]
-                nodeState[myself][NODE_TX_TIMER][target][STATS_T_1][TOTAL_SENT] += 1
-                nodeState[myself][NODE_TX_TIMER][target][STATS_T].remove(id)
-            elif not id[TX_T_ADDED]:
-                id[TX_T_TIMER] += 1
+            if list_to_iter[id][TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle:
+                nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_TIME] += list_to_iter[id][TX_T_TIMER]
+                nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_SENT] += 1
+                nodeState[myself][NODE_TX_TIMER][target][TIMER_T].remove(id)
+            elif not list_to_iter[id][TX_T_ADDED]:
+                nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id][TX_T_TIMER] += 1
 
         del list_to_iter
 
 
 def mark_tx_as_received(myself, id):
+    for target in nodeState[myself][NODE_TX_TIMER]:
+        if id in nodeState[myself][NODE_TX_TIMER][target][TIMER_T]:
+            nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id][TX_T_ADDED] = True
+
 # --------------------------------------
 
 
@@ -827,7 +845,9 @@ def broadcast_invs(myself):
                     break
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
-                    update_neighbourhood_inv(myself, target, TX_TYPE, tx, current_cycle)
+                    update_neighbourhood_inv(myself, target, TX_TYPE, tx)
+                    if hop_based_broadcast:
+                        set_timer(myself, target, tx, current_cycle)
                     counter += 1
             del copy
             sim.send(INV, target, myself, inv_to_send)
@@ -909,6 +929,9 @@ def update_tx(myself, block):
         if tx in nodeState[myself][NODE_TX_ALREADY_REQUESTED]:
             nodeState[myself][NODE_TX_ALREADY_REQUESTED].remove(tx)
 
+        if hop_based_broadcast:
+            mark_tx_as_received(myself, tx)
+
 
 def new_connection(myself, source):
     global nodeState
@@ -923,6 +946,7 @@ def new_connection(myself, source):
         nodeState[myself][NODE_NEIGHBOURHOOD_INV][source] = [SortedCollection(), defaultdict(), defaultdict()]
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source] = [[[], 0], [0, 0]]
         nodeState[myself][NODE_TIME_TO_SEND][source] = [poisson_send(nodeState[myself][CURRENT_CYCLE], 5), True]
+        nodeState[myself][NODE_TX_TIMER][source] = [0, defaultdict(), [0, 0]]
 
 
 # --------------------------------------
@@ -986,17 +1010,19 @@ def createNode(neighbourhood):
     time_to_send = defaultdict()
     topx = []
     node_headers_requested = []
+    timer = defaultdict()
     for neighbour in neighbourhood:
         node_neighbourhood_inv[neighbour] = [SortedCollection(), defaultdict(), defaultdict()]
         stats[neighbour] = [[[], 0], [0, 0]]
         time_to_send[neighbour] = [poisson_send(0, 2.5), False]
+        timer[neighbour] = [0, defaultdict(), [0, 0]]
     node_neighbourhood_stats = [topx, stats]
 
     msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
-            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send]
+            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send, timer]
 
 
 def create_nodes_and_miners(neighbourhood_size):
