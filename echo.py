@@ -729,20 +729,6 @@ def check_availability(myself, target, type, id):
             or (type == TX_TYPE and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]):
         return True
     return False
-
-
-def push_to_send(myself, id, mine):
-    global nodeState
-
-    if mine and hop_based_broadcast and early_push:
-        nodes_to_send = nodeState[myself][NODE_NEIGHBOURHOOD]
-    else:
-        nodes_to_send = get_nodes_to_send(myself)
-
-    for node in nodes_to_send:
-        if not check_availability(myself, node, TX_TYPE, id) and \
-                id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND]:
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND][id] = None
 # --------------------------------------
 
 
@@ -849,8 +835,22 @@ def broadcast_invs(myself):
                 nodeState[myself][MSGS][INV_MSG][SENT] += 1
 
 
+def push_to_send(myself, id, mine):
+    global nodeState
+
+    if not hop_based_broadcast or mine and hop_based_broadcast and early_push:
+        nodes_to_send = nodeState[myself][NODE_NEIGHBOURHOOD]
+    else:
+        nodes_to_send = get_nodes_to_send(myself)
+
+    for node in nodes_to_send:
+        if not check_availability(myself, node, TX_TYPE, id) and \
+                id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND]:
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND][id] = None
+
+
 def get_nodes_to_send(myself):
-    if not hop_based_broadcast or not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
+    if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return nodeState[myself][NODE_NEIGHBOURHOOD]
 
     total = top_nodes_size + random_nodes_size
@@ -1344,6 +1344,7 @@ def wrapup():
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
         csv_file_to_write = open('out/results.csv', 'w')
+        backup = open('backup.txt', 'w')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
@@ -1354,6 +1355,7 @@ def wrapup():
                               "Total blocks created", "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
+        backup = open('backup.txt', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
@@ -1363,6 +1365,13 @@ def wrapup():
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
                               avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)])
+        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
+                     .format("False", "False", early_push, number_of_bad_nodes, sum_inv / nb_nodes, avg_entries_per_inv,
+                              sum_getData / nb_nodes,
+                              avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
+                              sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
+                              avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, block_id,
+                              ''.join(str(e) + " " for e in hops_distribution)))
     else:
         spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, sum_inv / nb_nodes,
                               avg_entries_per_inv,
@@ -1371,6 +1380,15 @@ def wrapup():
                               avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
                               nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)])
+        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
+                     .format(top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, sum_inv / nb_nodes,
+                              avg_entries_per_inv,
+                              sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
+                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
+                              avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
+                              nb_forks, block_id,
+                              ''.join(str(e) + " " for e in hops_distribution)))
+    backup.close()
     csv_file_to_write.flush()
     csv_file_to_write.close()
     print(tx_id)
