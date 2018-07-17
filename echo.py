@@ -708,20 +708,6 @@ def check_availability(myself, target, type, id):
             or (type == TX_TYPE and id in nodeState[myself][NODE_NEIGHBOURHOOD_INV][target][NEIGHBOURHOOD_KNOWN_TX]):
         return True
     return False
-
-
-def push_to_send(myself, id, mine):
-    global nodeState
-
-    if mine and hop_based_broadcast and early_push:
-        nodes_to_send = nodeState[myself][NODE_NEIGHBOURHOOD]
-    else:
-        nodes_to_send = get_nodes_to_send(myself)
-
-    for node in nodes_to_send:
-        if not check_availability(myself, node, TX_TYPE, id) and \
-                id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND]:
-            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND][id] = None
 # --------------------------------------
 
 
@@ -828,8 +814,22 @@ def broadcast_invs(myself):
                 nodeState[myself][MSGS][INV_MSG][SENT] += 1
 
 
+def push_to_send(myself, id, mine):
+    global nodeState
+
+    if not hop_based_broadcast or mine and hop_based_broadcast and early_push:
+        nodes_to_send = nodeState[myself][NODE_NEIGHBOURHOOD]
+    else:
+        nodes_to_send = get_nodes_to_send(myself)
+
+    for node in nodes_to_send:
+        if not check_availability(myself, node, TX_TYPE, id) and \
+                id not in nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND]:
+            nodeState[myself][NODE_NEIGHBOURHOOD_INV][node][NEIGHBOURHOOD_TX_TO_SEND][id] = None
+
+
 def get_nodes_to_send(myself):
-    if not hop_based_broadcast or not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
+    if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return nodeState[myself][NODE_NEIGHBOURHOOD]
 
     total = top_nodes_size + random_nodes_size
