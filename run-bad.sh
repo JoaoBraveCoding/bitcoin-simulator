@@ -77,8 +77,13 @@ do
 
     if [ "$i" -eq "$cycles" ]
     then
-      current_tn=$tn
-      current_rn=$rn
+      if [ "$tn" -eq "0" ]
+      then
+        break
+      else
+        current_tn=$tn
+        current_rn=$rn
+      fi
     fi
 
     if [ "$numberPararelism" -eq "0" ] 
