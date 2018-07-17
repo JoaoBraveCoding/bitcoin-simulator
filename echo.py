@@ -638,6 +638,27 @@ def update_top(myself, source, score):
 
     if worst_index != -1:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
+
+
+def set_timer(myself, target, id, current_cycle):
+    nodeState[myself][NODE_TX_TIMER][target][STATS_T][id] = [current_cycle, current_cycle, False]
+
+
+def update_timer(myself, current_cycle):
+    for target in nodeState[myself][NODE_TX_TIMER]:
+        list_to_iter = list(nodeState[myself][NODE_TX_TIMER][target][STATS_T])
+        for id in list_to_iter:
+            if id[TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle:
+                nodeState[myself][NODE_TX_TIMER][target][STATS_T_1][TOTAL_TIME] += id[TX_T_TIMER]
+                nodeState[myself][NODE_TX_TIMER][target][STATS_T_1][TOTAL_SENT] += 1
+                nodeState[myself][NODE_TX_TIMER][target][STATS_T].remove(id)
+            elif not id[TX_T_ADDED]:
+                id[TX_T_TIMER] += 1
+
+        del list_to_iter
+
+
+def mark_tx_as_received(myself, id):
 # --------------------------------------
 
 
@@ -820,7 +841,7 @@ def broadcast_invs(myself):
                     break
                 if not check_availability(myself, target, TX_TYPE, tx):
                     inv_to_send.append((TX_TYPE, tx))
-                    update_neighbourhood_inv(myself, target, TX_TYPE, tx)
+                    update_neighbourhood_inv(myself, target, TX_TYPE, tx, current_cycle)
                     counter += 1
             del copy
             sim.send(INV, target, myself, inv_to_send)
