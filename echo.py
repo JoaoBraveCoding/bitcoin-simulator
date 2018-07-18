@@ -143,9 +143,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        #utput.flush()
-        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.flush()
+        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -616,7 +616,7 @@ def get_classification(myself, source, current_cycle):
         t_k += stat[0]
     if t_n == 0:
         t = 0
-    elif timer_k:
+    elif timer_k == 0:
         t = (t_k / t_n) + len(t_blocks) - t_n
     else:
         t = (t_k/t_n) + len(t_blocks) - t_n + (timer_k/timer_n)
@@ -677,7 +677,7 @@ def update_timer(myself, current_cycle):
             if list_to_iter[id][TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle:
                 nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_TIME] += list_to_iter[id][TX_T_TIMER]
                 nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_SENT] += 1
-                nodeState[myself][NODE_TX_TIMER][target][TIMER_T].remove(id)
+                del nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id]
             elif not list_to_iter[id][TX_T_ADDED]:
                 nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id][TX_T_TIMER] += 1
 
@@ -1387,7 +1387,8 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
-        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad nodes", "Avg inv", "Avg entries per inv",
+        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad nodes", "Timer solution",
+                              "Avg inv", "Avg entries per inv",
                               "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
                               "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
                               "Total tx created", "Total tx added to blocks", "Avg commit time", "Total number of branches",
@@ -1398,30 +1399,30 @@ def wrapup():
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
     if not hop_based_broadcast:
-        spam_writer.writerow(["False", "False", early_push, number_of_bad_nodes, sum_inv / nb_nodes, avg_entries_per_inv,
-                              sum_getData / nb_nodes,
+        spam_writer.writerow(["False", "False", early_push, number_of_bad_nodes, timer_solution, sum_inv / nb_nodes,
+                              avg_entries_per_inv, sum_getData / nb_nodes,
                               avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
                               avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)])
-        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
-                     .format("False", "False", early_push, number_of_bad_nodes, sum_inv / nb_nodes, avg_entries_per_inv,
-                              sum_getData / nb_nodes,
+        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
+                     .format("False", "False", early_push, number_of_bad_nodes, timer_solution, sum_inv / nb_nodes,
+                             avg_entries_per_inv, sum_getData / nb_nodes,
                               avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
                               sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
                               avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,  nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)))
     else:
-        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, sum_inv / nb_nodes,
-                              avg_entries_per_inv,
+        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, timer_solution,
+                              sum_inv / nb_nodes, avg_entries_per_inv,
                               sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
                               avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
                               nb_forks, block_id,
                               ''.join(str(e) + " " for e in hops_distribution)])
-        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
-                     .format(top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, sum_inv / nb_nodes,
-                              avg_entries_per_inv,
+        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
+                     .format(top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, timer_solution,
+                              sum_inv / nb_nodes, avg_entries_per_inv,
                               sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
                               sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
                               avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
@@ -1492,7 +1493,7 @@ if __name__ == '__main__':
             elif sys.argv[i] == "-bn":
                 number_of_bad_nodes = int(sys.argv[i+1])
             elif sys.argv[i] == "-ts":
-                timer_solution = int(sys.argv[i+1])
+                timer_solution = sys.argv[i+1]
             else:
                 raise ValueError("Input {} is invalid".format(sys.argv[i]))
             i += 2
