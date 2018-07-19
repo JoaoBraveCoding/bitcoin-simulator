@@ -967,18 +967,19 @@ def create_network(create_new, save_network_connections, neighbourhood_size, fil
     global nb_nodes, nodeState, miners
 
     first_time = not os.path.exists("networks/")
+    network_first_time = not os.path.exists("networks/" + filename)
 
     if first_time:
         os.makedirs("networks/")
 
-    if first_time or create_new:
+    if network_first_time or create_new:
         create_nodes_and_miners(neighbourhood_size)
         create_miner_replicas(neighbourhood_size)
-        create_bad_miner()
         if save_network_connections:
             save_network()
     else:
         load_network(filename)
+    create_bad_node()
 
 
 def save_network():
@@ -988,7 +989,6 @@ def save_network():
         for n in xrange(nb_nodes):
             file_to_write.write(str(nodeState[n][NODE_NEIGHBOURHOOD]) + '\n')
         file_to_write.write(str(miners) + '\n')
-        file_to_write.write(str(bad_nodes) + '\n')
 
 
 def load_network(filename):
@@ -1005,7 +1005,6 @@ def load_network(filename):
         for n in xrange(nb_nodes):
             nodeState[n] = createNode(ast.literal_eval(file_to_read.readline()))
         miners = ast.literal_eval(file_to_read.readline())
-        bad_nodes = ast.literal_eval(file_to_read.readline())
 
 
 def createNode(neighbourhood):
@@ -1071,7 +1070,7 @@ def create_miner_replicas(neighbourhood_size):
         nb_nodes = nb_nodes + (extra_replicas * number_of_miners)
 
 
-def create_bad_miner():
+def create_bad_node():
     global bad_nodes
 
     bad_nodes = random.sample(xrange(nb_nodes), int((number_of_bad_nodes/100) * nb_nodes))
