@@ -79,6 +79,9 @@ ALPHA = 0.3
 
 SAMPLE_SIZE = 100
 
+BLOCK_WEIGHT = 100
+TX_TIME_WEIGHT = 0.2
+
 
 def init():
     # schedule execution for all nodes
@@ -472,7 +475,8 @@ def generate_new_block(myself):
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = [nodeState[myself][CURRENT_CYCLE], 0]
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block[BLOCK_ID]
     block_id += 1
-    tx_created_after_last_block = 0
+    del tx_created_after_last_block
+    tx_created_after_last_block = []
     if new_block[BLOCK_HEIGHT] > highest_block:
         highest_block = new_block[BLOCK_HEIGHT]
     return new_block
@@ -617,9 +621,9 @@ def get_classification(myself, source, current_cycle):
     if t_n == 0:
         t = 0
     elif timer_k == 0:
-        t = (t_k / t_n) + len(t_blocks) - t_n
+        t = (t_k / t_n) + ((len(t_blocks) - t_n) * BLOCK_WEIGHT)
     else:
-        t = (t_k/t_n) + len(t_blocks) - t_n + ((timer_k/timer_n)*0.25)
+        t = (t_k/t_n) + ((len(t_blocks) - t_n) * BLOCK_WEIGHT) + ((timer_k/timer_n)*TX_TIME_WEIGHT)
 
     t_1_k = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]
     t_1_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED]
@@ -628,9 +632,9 @@ def get_classification(myself, source, current_cycle):
     if t_1_n == 0:
         t_1 = 0
     elif timer_1_k == 0:
-        t_1 = (t_1_k / t_1_n) + len(t_1_blocks) - t_1_n
+        t_1 = (t_1_k/t_1_n) + ((len(t_1_blocks) - t_1_n) * BLOCK_WEIGHT)
     else:
-        t_1 = (t_1_k/t_1_n) + len(t_1_blocks) - t_1_n + ((timer_1_k/timer_1_n)*0.25)
+        t_1 = (t_1_k/t_1_n) + ((len(t_1_blocks) - t_1_n) * BLOCK_WEIGHT) + ((timer_1_k/timer_1_n)*TX_TIME_WEIGHT)
 
     return (1 - ALPHA) * t_1 + ALPHA * t
 
@@ -776,7 +780,7 @@ def generate_new_tx(myself):
     if tx_array:
         tx_created.append([0, 0])
     tx_commit.append([nodeState[myself][CURRENT_CYCLE], False])
-    tx_created_after_last_block += 1
+    tx_created_after_last_block.append(new_tx)
     tx_id += 1
 
 
@@ -1133,7 +1137,7 @@ def configure(config):
     tx_id = 0
     tx_created = []
     tx_commit = []
-    tx_created_after_last_block = 0
+    tx_created_after_last_block = []
 
     values = []
     i = -1
@@ -1286,7 +1290,13 @@ def get_nb_tx_added_to_blocks():
 
 
 def get_nb_of_tx_gened():
-    return tx_id - tx_created_after_last_block - 1
+    tx_in_miners = []
+    for myself in miners:
+        for tx in nodeState[myself][NODE_MEMPOOL]:
+            if tx not in tx_created_after_last_block and not tx_commit[tx][COMMITED]:
+                tx_in_miners.append(tx)
+
+    return tx_id - len(tx_created_after_last_block) - len(tx_in_miners)
 
 
 def get_avg_time_commited():
