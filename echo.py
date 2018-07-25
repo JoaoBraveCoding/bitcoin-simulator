@@ -619,7 +619,7 @@ def get_classification(myself, source, current_cycle):
     elif timer_k == 0:
         t = (t_k / t_n) + len(t_blocks) - t_n
     else:
-        t = (t_k/t_n) + len(t_blocks) - t_n + (timer_k/timer_n)
+        t = (t_k/t_n) + len(t_blocks) - t_n + ((timer_k/timer_n)*0.25)
 
     t_1_k = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]
     t_1_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED]
@@ -630,7 +630,7 @@ def get_classification(myself, source, current_cycle):
     elif timer_1_k == 0:
         t_1 = (t_1_k / t_1_n) + len(t_1_blocks) - t_1_n
     else:
-        t_1 = (t_1_k/t_1_n) + len(t_1_blocks) - t_1_n + (timer_1_k/timer_1_n)
+        t_1 = (t_1_k/t_1_n) + len(t_1_blocks) - t_1_n + ((timer_1_k/timer_1_n)*0.25)
 
     return (1 - ALPHA) * t_1 + ALPHA * t
 
@@ -664,7 +664,7 @@ def update_top(myself, source, score):
 
 def set_timer(myself, target, id, current_cycle):
     if nodeState[myself][NODE_TX_TIMER][target][NOT_SAMPLED] > SAMPLE_SIZE:
-        nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id] = [current_cycle, current_cycle, False]
+        nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id] = [0, current_cycle, False]
         nodeState[myself][NODE_TX_TIMER][target][NOT_SAMPLED] = 0
     else:
         nodeState[myself][NODE_TX_TIMER][target][NOT_SAMPLED] += 1
@@ -674,7 +674,7 @@ def update_timer(myself, current_cycle):
     for target in nodeState[myself][NODE_TX_TIMER]:
         list_to_iter = dict(nodeState[myself][NODE_TX_TIMER][target][TIMER_T])
         for id in list_to_iter:
-            if list_to_iter[id][TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle:
+            if list_to_iter[id][TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle and list_to_iter[id][TX_T_ADDED]:
                 nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_TIME] += list_to_iter[id][TX_T_TIMER]
                 nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_SENT] += 1
                 del nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id]
@@ -1092,6 +1092,8 @@ def configure(config):
             hop_based_broadcast = False
         else:
             hop_based_broadcast = True
+            if not timer_solution:
+                timer_solution = bool(config['TIMER_SOLUTION'])
         top_nodes_size = top_nodes
         if random_nodes != -1:
             random_nodes_size = random_nodes
@@ -1101,7 +1103,8 @@ def configure(config):
         top_nodes_size = int(config['TOP_NODES_SIZE'])
         random_nodes_size = int(config['RANDOM_NODES_SIZE'])
         hop_based_broadcast = bool(config['HOP_BASED_BROADCAST'])
-        timer_solution = bool('TIMER_SOLUTION')
+        if not timer_solution:
+            timer_solution = bool(config['TIMER_SOLUTION'])
 
     if number_of_bad_nodes == 0:
         number_of_bad_nodes = int(config['NUMBER_OF_BAD_NODES'])
