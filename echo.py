@@ -774,8 +774,7 @@ def generate_new_tx(myself):
     new_tx = tx_id
     nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX][new_tx] = None
     nodeState[myself][NODE_MEMPOOL][new_tx] = None
-    if myself not in bad_nodes:
-        push_to_send(myself, new_tx, MINE)
+    push_to_send(myself, new_tx, MINE)
 
     if tx_array:
         tx_created.append([0, 0])
@@ -927,7 +926,7 @@ def next_t_to_gen(myself):
 
 
 def should_log(myself):
-    if (expert_log and 3600 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 3600) or not expert_log:
+    if (expert_log and 7200 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 7200) or not expert_log:
         return True
     return False
 
@@ -1128,8 +1127,8 @@ def configure(config):
 
     expert_log = bool(config['EXPERT_LOG'])
     if expert_log == True:
-        if nb_cycles <= 7200:
-            raise ValueError("With expert_log activated you have to complete more than 120 cycles")
+        if nb_cycles <= 14400:
+            raise ValueError("With expert_log activated you have to complete more than 14400 cycles")
 
     block_id = 0
     blocks_created = []
@@ -1293,7 +1292,7 @@ def get_nb_of_tx_gened():
     tx_in_miners = []
     for myself in miners:
         for tx in nodeState[myself][NODE_MEMPOOL]:
-            if tx not in tx_created_after_last_block and not tx_commit[tx][COMMITED]:
+            if tx not in tx_created_after_last_block and not tx_commit[tx][COMMITED] and tx not in tx_in_miners:
                 tx_in_miners.append(tx)
 
     return tx_id - len(tx_created_after_last_block) - len(tx_in_miners)

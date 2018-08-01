@@ -7,12 +7,12 @@ pids=()
 current_ep=False
 badNodesS=0
 badNodesE=0
-increment=1
+increment=5
 current_tn=0
 current_rn=0
 current_bn=0
-pypy=/usr/local/Cellar/pypy/5.10.0_1/bin/pypy
-
+#pypy=/usr/bin/pypy
+pypy=/usr/local/Cellar/pypy/6.0.0/bin/pypy
 
 if [ -z "$1" ]
 then
@@ -101,7 +101,17 @@ do
 done
 
 
+if [ "$numberPararelism" -eq "0" ] 
+then
+  for pid in ${pids[*]}; do
+    wait $pid
+    ((numberPararelism=numberPararelism+1))
+  done
+  pids=()
+fi
+(( runId=runId+1 ))
 i=1
+
 while [ "$i" -le "$aCycles" ]
 do
 
