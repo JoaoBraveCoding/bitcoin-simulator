@@ -33,7 +33,8 @@ HEADER_ID, HEADER_PARENT_ID = 0, 1
 # Node structure
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, NODE_BLOCKS_ALREADY_REQUESTED, \
 NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, NODE_NEIGHBOURHOOD_STATS, MSGS, \
-NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODE_TOP_NODES_SIZE, MY_UNCONFIRMED_TX\
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
@@ -75,13 +76,15 @@ TOTAL_TIME, TOTAL_SENT = 0, 1
 
 TIME_FRAME = 14400
 
-ALPHA = 0.3
-
 SAMPLE_SIZE = 100
 
+ALPHA = 0.3
+
 BLOCK_WEIGHT = 100
+
 TX_TIME_WEIGHT = 0.2
 
+TIME_FOR_TX_CONFIRMATION = 1200
 
 def init():
     # schedule execution for all nodes
@@ -141,6 +144,9 @@ def CYCLE(myself):
     # with churn the node might be gone
     if myself not in nodeState:
         return
+
+    if nodeState[myself][CURRENT_CYCLE] % 600 == 0:
+        increase_relay(myself)
 
     # show progress for one node
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
@@ -645,7 +651,7 @@ def update_top(myself, source, score):
         return
 
     if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] or \
-            len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < top_nodes_size:
+            len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < nodeState[myself][NODE_TOP_NODES_SIZE]:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(source)
         return
 
@@ -692,6 +698,30 @@ def mark_tx_as_received(myself, id):
     for target in nodeState[myself][NODE_TX_TIMER]:
         if id in nodeState[myself][NODE_TX_TIMER][target][TIMER_T]:
             nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id][TX_T_ADDED] = True
+
+
+def increase_relay(myself):
+    increased = False
+    to_remove = []
+
+    for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
+        if increased or not hop_based_broadcast:
+            break
+
+        if nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION < nodeState[myself][CURRENT_CYCLE]:
+            if tx_commit[tx][COMMITED]:
+                to_remove.append(tx)
+                continue
+            if not increased and nodeState[myself][NODE_TOP_NODES_SIZE] < len(nodeState[myself][NODE_NEIGHBOURHOOD]):
+                nodeState[myself][NODE_TOP_NODES_SIZE] += 1
+                increased = True
+                for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
+                    update_neighbour_statistics(myself, neighbour)
+
+            push_to_send(myself, MINE, tx)
+
+    for tx in to_remove:
+        del nodeState[myself][MY_UNCONFIRMED_TX][tx]
 
 # --------------------------------------
 
@@ -780,6 +810,7 @@ def generate_new_tx(myself):
         tx_created.append([0, 0])
     tx_commit.append([nodeState[myself][CURRENT_CYCLE], False])
     tx_created_after_last_block.append(new_tx)
+    nodeState[myself][MY_UNCONFIRMED_TX][new_tx] = nodeState[myself][CURRENT_CYCLE]
     tx_id += 1
 
 
@@ -888,7 +919,7 @@ def get_nodes_to_send(myself):
     if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return nodeState[myself][NODE_NEIGHBOURHOOD]
 
-    total = top_nodes_size + random_nodes_size
+    total = nodeState[myself][NODE_TOP_NODES_SIZE] + random_nodes_size
     top_nodes = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]
     if len(nodeState[myself][NODE_NEIGHBOURHOOD]) < total:
         total = len(nodeState[myself][NODE_NEIGHBOURHOOD]) - len(top_nodes)
@@ -937,6 +968,9 @@ def update_tx(myself, block):
     for tx in block[BLOCK_TX]:
         if tx in nodeState[myself][NODE_MEMPOOL]:
             del nodeState[myself][NODE_MEMPOOL][tx]
+
+        if tx in nodeState[myself][MY_UNCONFIRMED_TX]:
+            del nodeState[myself][MY_UNCONFIRMED_TX][tx]
 
         for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
             update_neighbourhood_inv(myself, neighbour, TX_TYPE, tx)
@@ -1031,12 +1065,15 @@ def createNode(neighbourhood):
         time_to_send[neighbour] = [poisson_send(0, 2.5), False]
         timer[neighbour] = [0, defaultdict(), [0, 0]]
     node_neighbourhood_stats = [topx, stats]
+    node_top_nodes_size = top_nodes_size
+    my_unconfirmed_tx = {}
 
     msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
-            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send, timer]
+            node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send, timer,
+            node_top_nodes_size, my_unconfirmed_tx]
 
 
 def create_nodes_and_miners(neighbourhood_size):
