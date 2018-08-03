@@ -86,6 +86,8 @@ TX_TIME_WEIGHT = 0.2
 
 TIME_FOR_TX_CONFIRMATION = 1200
 
+INTERVAL = 18000
+
 def init():
     # schedule execution for all nodes
     for nodeId in nodeState:
@@ -145,16 +147,16 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    if nodeState[myself][CURRENT_CYCLE] % 600 == 0:
+    if nodeState[myself][CURRENT_CYCLE] % 1200 == 0 and (hop_based_broadcast and nodeState[myself][CURRENT_CYCLE] > 18000):
         increase_relay(myself)
 
     # show progress for one node
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        output.flush()
-        #print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.flush()
+        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -904,7 +906,8 @@ def broadcast_invs(myself):
 def push_to_send(myself, id, mine):
     global nodeState
 
-    if not hop_based_broadcast or mine and hop_based_broadcast and early_push:
+    if not hop_based_broadcast or mine and hop_based_broadcast and early_push or \
+            hop_based_broadcast and nodeState[myself][CURRENT_CYCLE] < 18000:
         nodes_to_send = nodeState[myself][NODE_NEIGHBOURHOOD]
     else:
         nodes_to_send = get_nodes_to_send(myself)
@@ -957,7 +960,7 @@ def next_t_to_gen(myself):
 
 
 def should_log(myself):
-    if (expert_log and 7200 < nodeState[myself][CURRENT_CYCLE] < nb_cycles - 7200) or not expert_log:
+    if (expert_log and INTERVAL < nodeState[myself][CURRENT_CYCLE] < nb_cycles - INTERVAL) or not expert_log:
         return True
     return False
 
@@ -1163,9 +1166,8 @@ def configure(config):
     total_blocks_mined_by_randoms = (nb_cycles/10) * 0.052
 
     expert_log = bool(config['EXPERT_LOG'])
-    if expert_log == True:
-        if nb_cycles <= 14400:
-            raise ValueError("With expert_log activated you have to complete more than 14400 cycles")
+    if nb_cycles <= INTERVAL:
+        raise ValueError("You have to complete more than {} cycles".format(INTERVAL))
 
     block_id = 0
     blocks_created = []
@@ -1292,7 +1294,7 @@ def get_avg_tx_per_block():
     total_num_if_tx = 0
     blocks_not_counted = 0
     for block in blocks_created:
-        if (expert_log and 3600 < block[BLOCK_TIMESTAMP] < nb_cycles - 3600) or not expert_log:
+        if (expert_log and INTERVAL < block[BLOCK_TIMESTAMP] < nb_cycles - INTERVAL) or not expert_log:
             if isinstance(block[BLOCK_TX], int):
                 total_num_if_tx += block[BLOCK_TX]
             else:
