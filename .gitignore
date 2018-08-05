@@ -109,3 +109,10 @@ bitcoin-build/*.tar.gz
 #SimpleDA
 conf_echo/*.obj
 conf_echo/*.gpData
+networks/
+output.txt
+run-test.sh
+
+#Mac
+*.DS_Store
+	
