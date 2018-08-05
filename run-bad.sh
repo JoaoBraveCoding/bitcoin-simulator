@@ -13,6 +13,7 @@ current_rn=0
 current_bn=0
 pypy=/usr/bin/pypy
 #pypy=/usr/local/Cellar/pypy/6.0.0/bin/pypy
+#pypy=/home/ubuntu/pypy/bin/pypy
 
 if [ -z "$1" ]
 then
