@@ -9,7 +9,6 @@ rn=0
 pids=()
 current_ep=False
 badNodes=0
-behaviour=0
 
 
 if [ -z "$1" ]
@@ -53,7 +52,7 @@ do
       then
         pypy echo.py conf_echo/ $runId -sn True
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes $behaviour
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodes
       fi
     else
       if [ "$runId" -eq "1" ]
@@ -62,7 +61,7 @@ do
         pids[$runId]=$!
         sleep 10 
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes $behaviour & 
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodes & 
         pids[$runId]=$!
       fi
       ((numberPararelism=numberPararelism-1))

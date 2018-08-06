@@ -74,18 +74,24 @@ NOT_SAMPLED, TIMER_T, TIMER_T_1 = 0, 1, 2
 
 TOTAL_TIME, TOTAL_SENT = 0, 1
 
+# Time frame between t and t_1
 TIME_FRAME = 14400
 
+# Sample intervals we take to calculate the time weight
 SAMPLE_SIZE = 100
 
 ALPHA = 0.3
 
+# Weight we give to blocks received from a nodes
 BLOCK_WEIGHT = 100
 
+# Weight we give to time it takes for  tx to appear in a block once we send it
 TX_TIME_WEIGHT = 0.2
 
+# Time it should take for a tx to be accepted
 TIME_FOR_TX_CONFIRMATION = 1200
 
+# Interval where the log is not recorded first x sec and last x sec
 INTERVAL = 18000
 
 
