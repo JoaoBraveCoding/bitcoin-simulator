@@ -33,7 +33,7 @@ HEADER_ID, HEADER_PARENT_ID = 0, 1
 # Node structure
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, NODE_BLOCKS_ALREADY_REQUESTED, \
 NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, NODE_NEIGHBOURHOOD_STATS, MSGS, \
-NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODE_TOP_NODES_SIZE, MY_UNCONFIRMED_TX \
+NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODES_SIZE, MY_UNCONFIRMED_TX \
     = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
@@ -45,6 +45,8 @@ TOP_N_NODES, STATS = 0, 1
 STATS_T, STATS_T_1 = 0, 1
 
 TOTAL_TLL, TOTAL_MSG_RECEIVED = 0, 1
+
+TOP, RAND = 0, 1
 
 # Counter structure
 INV_MSG, GETHEADERS_MSG, HEADERS_MSG, GETDATA_MSG, BLOCK_MSG, CMPCTBLOCK_MSG, GETBLOCKTXN_MSG, BLOCKTXN_MSG, TX_MSG, MISSING_TX, \
@@ -89,7 +91,7 @@ BLOCK_WEIGHT = 100
 TX_TIME_WEIGHT = 0.2
 
 # Time it should take for a tx to be accepted
-TIME_FOR_TX_CONFIRMATION = 1200
+TIME_FOR_TX_CONFIRMATION = 1800
 
 # Interval where the log is not recorded first x sec and last x sec
 INTERVAL = 18000
@@ -154,7 +156,7 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    if nodeState[myself][CURRENT_CYCLE] % 1200 == 0 and (hop_based_broadcast and nodeState[myself][CURRENT_CYCLE] > 18000):
+    if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
         increase_relay(myself)
 
     # show progress for one node
@@ -163,7 +165,7 @@ def CYCLE(myself):
         value = datetime.datetime.fromtimestamp(time.time())
         # output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
         # output.flush()
-        print('{} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -491,7 +493,7 @@ def generate_new_block(myself):
 
     # Store the new block
     blocks_created.append(new_block)
-    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = [nodeState[myself][CURRENT_CYCLE], 0]
+    nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS][new_block[BLOCK_ID]] = nodeState[myself][CURRENT_CYCLE]
     nodeState[myself][NODE_CURRENT_BLOCK] = new_block[BLOCK_ID]
     block_id += 1
     del tx_created_after_last_block
@@ -597,7 +599,6 @@ def process_block(myself, source, block):
 def update_neighbour_statistics(myself, source):
     current_cycle = nodeState[myself][CURRENT_CYCLE]
     if nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
-
         time_frame = current_cycle - nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL][-1][1]
     elif nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]:
         time_frame = current_cycle - TIME_FRAME
@@ -608,7 +609,7 @@ def update_neighbour_statistics(myself, source):
     nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED] += 1
     stats_to_remove = []
     for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
-        if stat[1] + TIME_FRAME < current_cycle:
+        if stat[1] + TIME_FRAME <= current_cycle:
             stats_to_remove.append(stat)
     for stat in stats_to_remove:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL].remove(stat)
@@ -624,32 +625,34 @@ def get_classification(myself, source, current_cycle):
     t_blocks = []
     t_1_blocks = []
     for block in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_BLOCKS].items():
-        if block[TS_RECEIVED] + TIME_FRAME > current_cycle:
+        if block[1] + TIME_FRAME > current_cycle:
             t_blocks.append(block)
         else:
             t_1_blocks.append(block)
 
-    update_timer_lists(myself, source, current_cycle)
+    if hop_based_broadcast and timer_solution:
+        update_timer_lists(myself, source, current_cycle)
 
     t_k = 0
     t_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_MSG_RECEIVED]
     timer_k = 0
     timer_n = 0
     for tx in nodeState[myself][NODE_TX_TIMER][source][TIMER_T]:
-        timer_n += 1
         tx_struct = nodeState[myself][NODE_TX_TIMER][source][TIMER_T][tx]
-        if tx_struct[TX_T_CYCLE_COMMITED] is None:
-            timer_k += current_cycle - tx_struct[TX_T_CYCLE_RECEIVED]
-        else:
+        if tx_struct[TX_T_CYCLE_COMMITED] is not None:
+            timer_n += 1
             timer_k += tx_struct[TX_T_CYCLE_COMMITED] - tx_struct[TX_T_CYCLE_RECEIVED]
     for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
         t_k += stat[0]
     if t_n == 0:
         t = 0
     elif timer_k == 0:
-        t = (t_k / t_n) + ((len(t_blocks) - t_n) * BLOCK_WEIGHT)
+        t = (t_k / t_n) + (len(t_blocks) - t_n)
     else:
-        t = (t_k / t_n) + ((len(t_blocks) - t_n) * BLOCK_WEIGHT) + ((timer_k / timer_n) * TX_TIME_WEIGHT)
+        a = ((t_k / t_n)/600)
+        b = (len(t_blocks) - t_n)
+        c = ((timer_k / timer_n) / 600)
+        t = ((t_k / t_n)/600) + (len(t_blocks) - t_n) + ((timer_k / timer_n) / 600)
 
     t_1_k = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]
     t_1_n = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED]
@@ -658,9 +661,12 @@ def get_classification(myself, source, current_cycle):
     if t_1_n == 0:
         t_1 = 0
     elif timer_1_k == 0:
-        t_1 = (t_1_k / t_1_n) + ((len(t_1_blocks) - t_1_n) * BLOCK_WEIGHT)
+        t_1 = ((t_1_k / t_1_n)/600) + (len(t_1_blocks) - t_1_n)
     else:
-        t_1 = (t_1_k / t_1_n) + ((len(t_1_blocks) - t_1_n) * BLOCK_WEIGHT) + ((timer_1_k / timer_1_n) * TX_TIME_WEIGHT)
+        a_1 = (t_1_k / t_1_n)/600
+        b_1 = (len(t_1_blocks) - t_1_n)
+        c_1 = ((timer_1_k / timer_1_n) / 600)
+        t_1 = ((t_1_k / t_1_n)/600) + (len(t_1_blocks) - t_1_n) + ((timer_1_k / timer_1_n) / 600)
 
     return (1 - ALPHA) * t_1 + ALPHA * t
 
@@ -671,7 +677,7 @@ def update_top(myself, source, score):
         return
 
     if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] or \
-            len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < nodeState[myself][NODE_TOP_NODES_SIZE]:
+            len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < nodeState[myself][NODES_SIZE][TOP]:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(source)
         return
 
@@ -733,11 +739,10 @@ def increase_relay(myself):
             if tx_commit[tx][COMMITED]:
                 to_remove.append(tx)
                 continue
-            if not increased and nodeState[myself][NODE_TOP_NODES_SIZE] < len(nodeState[myself][NODE_NEIGHBOURHOOD]):
-                nodeState[myself][NODE_TOP_NODES_SIZE] += 1
+            if not increased and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
+                nodeState[myself][NODES_SIZE][TOP] += 1
+                nodeState[myself][NODES_SIZE][RAND] += 1
                 increased = True
-                for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
-                    update_neighbour_statistics(myself, neighbour)
 
             push_to_send(myself, MINE, tx)
 
@@ -947,7 +952,7 @@ def get_nodes_to_send(myself):
     if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return nodeState[myself][NODE_NEIGHBOURHOOD]
 
-    total = nodeState[myself][NODE_TOP_NODES_SIZE] + random_nodes_size
+    total = nodeState[myself][NODES_SIZE][TOP] + nodeState[myself][NODES_SIZE][RAND]
     top_nodes = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]
     if len(nodeState[myself][NODE_NEIGHBOURHOOD]) < total:
         total = len(nodeState[myself][NODE_NEIGHBOURHOOD]) - len(top_nodes)
@@ -1095,7 +1100,7 @@ def createNode(neighbourhood):
         time_to_send[neighbour] = [poisson_send(0, 2.5), False]
         timer[neighbour] = [0, defaultdict(), [0, 0]]
     node_neighbourhood_stats = [topx, stats]
-    node_top_nodes_size = top_nodes_size
+    node_top_nodes_size = [top_nodes_size, random_nodes_size]
     my_unconfirmed_tx = {}
 
     msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
