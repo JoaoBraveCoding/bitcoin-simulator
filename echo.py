@@ -157,13 +157,14 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    increase_relay(myself)
+    if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
+        increase_relay(myself)
 
     # show progress for one node
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        # output.write('{} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        # output.write('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
         # output.flush()
         print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
@@ -743,6 +744,10 @@ def increase_relay(myself):
     to_remove = []
 
     for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
+        if increased and nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION < nodeState[myself][CURRENT_CYCLE]:
+            push_to_send(myself, MINE, tx)
+            continue
+
         if increased or not hop_based_broadcast:
             break
 
@@ -750,9 +755,9 @@ def increase_relay(myself):
             if tx_commit[tx][COMMITED]:
                 to_remove.append(tx)
                 continue
-            if not increased and nodeState[myself][NODES_SIZE][TOP] + 3 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
-                nodeState[myself][NODES_SIZE][TOP] += 3
-                nodeState[myself][NODES_SIZE][RAND] += 3
+            if not increased and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
+                nodeState[myself][NODES_SIZE][TOP] += 1
+                nodeState[myself][NODES_SIZE][RAND] += 1
                 increased = True
                 up_top(myself)
 
