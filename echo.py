@@ -6,6 +6,7 @@ from __future__ import division
 import ast
 import csv
 import gc
+from operator import itemgetter
 
 import datetime
 import time
@@ -156,8 +157,7 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
-        increase_relay(myself)
+    increase_relay(myself)
 
     # show progress for one node
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
@@ -649,9 +649,6 @@ def get_classification(myself, source, current_cycle):
     elif timer_k == 0:
         t = (t_k / t_n) + (len(t_blocks) - t_n)
     else:
-        a = ((t_k / t_n)/600)
-        b = (len(t_blocks) - t_n)
-        c = ((timer_k / timer_n) / 600)
         t = ((t_k / t_n)/600) + (len(t_blocks) - t_n) + ((timer_k / timer_n) / 600)
 
     t_1_k = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL]
@@ -663,9 +660,6 @@ def get_classification(myself, source, current_cycle):
     elif timer_1_k == 0:
         t_1 = ((t_1_k / t_1_n)/600) + (len(t_1_blocks) - t_1_n)
     else:
-        a_1 = (t_1_k / t_1_n)/600
-        b_1 = (len(t_1_blocks) - t_1_n)
-        c_1 = ((timer_1_k / timer_1_n) / 600)
         t_1 = ((t_1_k / t_1_n)/600) + (len(t_1_blocks) - t_1_n) + ((timer_1_k / timer_1_n) / 600)
 
     return (1 - ALPHA) * t_1 + ALPHA * t
@@ -696,6 +690,23 @@ def update_top(myself, source, score):
 
     if worst_index != -1:
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
+
+
+def up_top(myself):
+    available_spots = nodeState[myself][NODES_SIZE][TOP] - len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES])
+
+    scores = []
+    for id in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        if id not in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
+            score = get_classification(myself, id, nodeState[myself][CURRENT_CYCLE])
+            scores.append([score, id])
+
+    scores.sort()
+    i = 0
+    while available_spots > 0:
+        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(scores[i][1])
+        i += 1
+        available_spots -= 1
 
 
 def set_timer(myself, target, id, current_cycle):
@@ -739,10 +750,11 @@ def increase_relay(myself):
             if tx_commit[tx][COMMITED]:
                 to_remove.append(tx)
                 continue
-            if not increased and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
-                nodeState[myself][NODES_SIZE][TOP] += 1
-                nodeState[myself][NODES_SIZE][RAND] += 1
+            if not increased and nodeState[myself][NODES_SIZE][TOP] + 3 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
+                nodeState[myself][NODES_SIZE][TOP] += 3
+                nodeState[myself][NODES_SIZE][RAND] += 3
                 increased = True
+                up_top(myself)
 
             push_to_send(myself, MINE, tx)
 
