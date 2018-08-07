@@ -112,6 +112,7 @@ conf_echo/*.gpData
 networks/
 output.txt
 run-test.sh
+backup.txt
 
 #Mac
 *.DS_Store
