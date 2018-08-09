@@ -25,6 +25,12 @@ import utils
 # Node structure
 CURRENT_CYCLE, NODE_NEIGHBOURHOOD, MSGS = 0, 1, 2
 
+# Node neighbour structure
+PING_STRC = 0
+
+# Ping structure
+PING_NONCE_SENT, PING_TIME_START, PING_TIME, BEST_PING_TIME = 0, 1, 2, 3
+
 # Messages sent
 VERSION_MSG, VERACK_MSG, ADDR_MSG, PING_MSG, PONG_MSG = 0, 1, 2, 3, 4
 
@@ -53,7 +59,7 @@ def improve_performance(cycle):
 
 
 def CYCLE(myself):
-    global nodeState
+    global nodeState, ping_nonce
 
     # with churn the node might be gone
     if myself not in nodeState:
@@ -63,9 +69,16 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} id: {} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
-        output.flush()
-        #print('{} id: {} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
+        #output.write('{} id: {} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
+        #output.flush()
+        print('{} id: {} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
+
+    for node in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        pfrom = nodeState[myself][NODE_NEIGHBOURHOOD][node]
+        pfrom[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_CYCLE]
+        pfrom[PING_STRC][PING_NONCE_SENT] = ping_nonce
+        ping_nonce += 1
+        sim.send(PING, node, myself, pfrom[PING_STRC][PING_NONCE_SENT])
 
     nodeState[myself][CURRENT_CYCLE] += 1
     # schedule next execution
@@ -99,7 +112,7 @@ def ADDR(myself, source):
         nodeState[myself][MSGS][ADDR_MSG] += 1
 
 
-def PING(myself, source):
+def PING(myself, source, nonce):
     global nodeState
 
     # TODO prevent nodes from starting communications with this message in case that could happen
@@ -107,17 +120,35 @@ def PING(myself, source):
     if should_log(myself):
         nodeState[myself][MSGS][PING_MSG] += 1
 
-    smth = None
-    sim.send(PONG, source, myself, smth)
+    sim.send(PONG, source, myself, nonce)
 
 
-def PONG(myself, source):
+def PONG(myself, source, nonce):
     global nodeState
 
     # TODO prevent nodes from starting communications with this message in case that could happen
-
     if should_log(myself):
         nodeState[myself][MSGS][PONG_MSG] += 1
+
+    pfrom = nodeState[myself][NODE_NEIGHBOURHOOD][source]
+    ping_time_end = nodeState[myself][CURRENT_CYCLE]
+    b_ping_finished = False
+
+    if pfrom[PING_STRC][PING_NONCE_SENT] != 0:
+        if nonce == pfrom[PING_STRC][PING_NONCE_SENT]:
+            b_ping_finished = True
+            ping_time = ping_time_end - pfrom[PING_STRC][PING_TIME_START]
+            if ping_time > 0:
+                pfrom[PING_STRC][PING_TIME] = ping_time
+                pfrom[PING_STRC][BEST_PING_TIME] = min(pfrom[PING_STRC][BEST_PING_TIME], ping_time)
+            else:
+                raise ValueError("This should never happen")
+        else:
+            if nonce == 0:
+                b_ping_finished = True
+
+    if b_ping_finished:
+        pfrom[PING_STRC][PING_NONCE_SENT] = 0
 
 
 def should_log(myself):
@@ -135,12 +166,13 @@ def new_connection(myself, source):
     if source in nodeState[myself][NODE_NEIGHBOURHOOD]:
         return
     else:
-        nodeState[myself][NODE_NEIGHBOURHOOD].append(source)
+        ping = [0, 0, 0, 0]
+        nodeState[myself][NODE_NEIGHBOURHOOD][source] = [ping]
 
 
 # --------------------------------------
 # Start up functions
-def create_network(create_new, save_network_connections, neighbourhood_size, filename=""):
+def create_network(create_new_network, save_network_conn, neighbourhood_size, filename=""):
 
     first_time = not os.path.exists("networks/")
     network_first_time = not os.path.exists("networks/" + filename)
@@ -148,9 +180,9 @@ def create_network(create_new, save_network_connections, neighbourhood_size, fil
     if first_time:
         os.makedirs("networks/")
 
-    if network_first_time or create_new:
+    if network_first_time or create_new_network:
         create_nodes(neighbourhood_size)
-        if save_network_connections:
+        if save_network_conn:
             save_network()
     else:
         load_network(filename)
@@ -181,8 +213,12 @@ def load_network(filename):
 def create_node(neighbourhood):
     current_cycle = 0
     msgs = [0, 0, 0, 0, 0]
+    ping = [0, 0, 0, 0]
+    neighbourhood_dic = defaultdict()
+    for neighbour in neighbourhood:
+        neighbourhood_dic[neighbour] = [ping]
 
-    return [current_cycle, neighbourhood, msgs]
+    return [current_cycle, neighbourhood_dic, msgs]
 
 
 def create_nodes(neighbourhood_size):
@@ -203,7 +239,7 @@ def create_bad_node():
 
 
 def configure(config):
-    global nb_nodes, nb_cycles, nodeState, node_cycle, expert_log, bad_nodes, number_of_bad_nodes
+    global nb_nodes, nb_cycles, nodeState, node_cycle, expert_log, bad_nodes, number_of_bad_nodes, ping_nonce
 
     node_cycle = int(config['NODE_CYCLE'])
 
@@ -242,13 +278,14 @@ def configure(config):
     latencyTable = utils.check_latency_nodes(latencyTable, nb_nodes, latencyValue)
     latencyDrift = eval(config['LATENCY_DRIFT'])
 
+
+    ping_nonce = 0
     sim.init(node_cycle, nodeDrift, latencyTable, latencyDrift)
 # --------------------------------------
 
 
 # --------------------------------------
 # Wrap up functions
-
 def wrapup():
     global nodeState
     version_messages = map(lambda x: nodeState[x][MSGS][VERSION_MSG], nodeState)
@@ -257,8 +294,7 @@ def wrapup():
     ping_messages = map(lambda x: nodeState[x][MSGS][PING_MSG], nodeState)
     pong_messages = map(lambda x: nodeState[x][MSGS][PONG_MSG], nodeState)
     utils.dump_as_gnu_plot([version_messages, verack_messages, addr_messages, ping_messages, pong_messages],
-                        dumpPath + '/messages-' + str(runId) + '.gpData',
-                        ['version verack addr ping poing'])
+                           dumpPath + '/messages-' + str(runId) + '.gpData', ['version verack addr ping pong'])
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
