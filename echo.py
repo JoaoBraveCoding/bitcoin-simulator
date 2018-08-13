@@ -29,7 +29,7 @@ CURRENT_CYCLE, NODE_NEIGHBOURHOOD, MSGS = 0, 1, 2
 INBOUND, PING_STRC, ADDR_STRC = 0, 1, 2
 
 # Addr structure
-NEXT_ADDR_SEND, ADDR_TO_SEND, ADDR_KNOWN, NEXT_LOCAL_ADDR_SEND = 0, 1, 2, 3
+SENT_ADDR, NEXT_ADDR_SEND, NEXT_LOCAL_ADDR_SEND, ADDR_TO_SEND, ADDR_KNOWN = 0, 1, 2, 3, 4
 
 AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL = 24 * 60 * 60
 
@@ -43,7 +43,7 @@ PING_NONCE_SENT, PING_TIME_START, PING_TIME, BEST_PING_TIME = 0, 1, 2, 3
 PING_INTERVAL = 2 * 60
 
 # Messages sent
-VERSION_MSG, VERACK_MSG, ADDR_MSG, PING_MSG, PONG_MSG = 0, 1, 2, 3, 4
+VERSION_MSG, VERACK_MSG, GET_ADDR_MSG, ADDR_MSG, PING_MSG, PONG_MSG = 0, 1, 2, 3, 4, 5
 
 # Log intervals
 INTERVAL = 18000
@@ -159,6 +159,26 @@ def VERACK(myself, source):
 
 
 def GETADDR(myself, source):
+    global nodeState
+
+    # TODO prevent nodes from starting communications with this message in case that could happen
+
+    if should_log(myself):
+        nodeState[myself][MSGS][GET_ADDR_MSG] += 1
+
+    pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
+    if not pto[INBOUND]:
+        return
+
+    if pto[ADDR_STRC][SENT_ADDR]:
+        return
+
+    pto[ADDR_STRC][SENT_ADDR] = True
+
+    pto[ADDR_STRC][ADDR_TO_SEND] = []
+    addr_to_send = nodeState[myself][NODE_NEIGHBOURHOOD].keys()
+    for addr in addr_to_send:
+        push_address(pto, addr)
 
 
 def ADDR(myself, source):
@@ -305,7 +325,7 @@ def create_node(neighbourhood):
 
 def create_neighbour(inbound):
     ping = [0, 0, 0, 0]
-    addr = [0, [], []]
+    addr = [False, 0, 0, [], []]
     return [inbound, ping, addr]
 
 
@@ -378,11 +398,12 @@ def wrapup():
     global nodeState
     version_messages = map(lambda x: nodeState[x][MSGS][VERSION_MSG], nodeState)
     verack_messages = map(lambda x: nodeState[x][MSGS][VERACK_MSG], nodeState)
+    get_addr_messages = map(lambda x: nodeState[x][MSGS][GET_ADDR_MSG], nodeState)
     addr_messages = map(lambda x: nodeState[x][MSGS][ADDR_MSG], nodeState)
     ping_messages = map(lambda x: nodeState[x][MSGS][PING_MSG], nodeState)
     pong_messages = map(lambda x: nodeState[x][MSGS][PONG_MSG], nodeState)
-    utils.dump_as_gnu_plot([version_messages, verack_messages, addr_messages, ping_messages, pong_messages],
-                           dumpPath + '/messages-' + str(runId) + '.gpData', ['version verack addr ping pong'])
+    utils.dump_as_gnu_plot([version_messages, verack_messages, get_addr_messages, addr_messages, ping_messages, pong_messages],
+                           dumpPath + '/messages-' + str(runId) + '.gpData', ['version verack get_addr addr ping pong'])
 
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
