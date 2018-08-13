@@ -26,14 +26,26 @@ import utils
 CURRENT_CYCLE, NODE_NEIGHBOURHOOD, MSGS = 0, 1, 2
 
 # Node neighbour structure
-PING_STRC = 0
+INBOUND, PING_STRC, ADDR_STRC = 0, 1, 2
+
+# Addr structure
+NEXT_ADDR_SEND, ADDR_TO_SEND, ADDR_KNOWN, NEXT_LOCAL_ADDR_SEND = 0, 1, 2, 3
+
+AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL = 24 * 60 * 60
+
+AVG_ADDRESS_BROADCAST_INTERVAL = 30
+
+MAX_ADDR_MSG_SIZE = 1000
 
 # Ping structure
 PING_NONCE_SENT, PING_TIME_START, PING_TIME, BEST_PING_TIME = 0, 1, 2, 3
 
+PING_INTERVAL = 2 * 60
+
 # Messages sent
 VERSION_MSG, VERACK_MSG, ADDR_MSG, PING_MSG, PONG_MSG = 0, 1, 2, 3, 4
 
+# Log intervals
 INTERVAL = 18000
 
 
@@ -59,7 +71,7 @@ def improve_performance(cycle):
 
 
 def CYCLE(myself):
-    global nodeState, ping_nonce
+    global nodeState
 
     # with churn the node might be gone
     if myself not in nodeState:
@@ -74,16 +86,59 @@ def CYCLE(myself):
         print('{} id: {} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
 
     for node in nodeState[myself][NODE_NEIGHBOURHOOD]:
-        pfrom = nodeState[myself][NODE_NEIGHBOURHOOD][node]
-        pfrom[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_CYCLE]
-        pfrom[PING_STRC][PING_NONCE_SENT] = ping_nonce
-        ping_nonce += 1
-        sim.send(PING, node, myself, pfrom[PING_STRC][PING_NONCE_SENT])
+        cnode = nodeState[myself][NODE_NEIGHBOURHOOD][node]
+        send_messages(myself, node, cnode)
 
     nodeState[myself][CURRENT_CYCLE] += 1
     # schedule next execution
     if nodeState[myself][CURRENT_CYCLE] < nb_cycles:
         sim.schedulleExecution(CYCLE, myself)
+
+
+def send_messages(myself, target, pto):
+    # TODO check if we are successfully connected
+    send_ping(myself, target, pto)
+    send_reject_and_check_if_banned(myself, target, pto)
+    address_refresh_broadcast(myself, target, pto)
+    send_addr(myself, target, pto)
+
+
+def send_ping(myself, target, pto):
+    global ping_nonce
+
+    ping_send = False
+    if pto[PING_STRC][PING_NONCE_SENT] == 0 and pto[PING_STRC][PING_TIME_START] + PING_INTERVAL < nodeState[myself][CURRENT_CYCLE]:
+        ping_send = True
+    if ping_send:
+        pto[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_CYCLE]
+        pto[PING_STRC][PING_NONCE_SENT] = ping_nonce
+        ping_nonce += 1
+        sim.send(PING, target, myself, pto[PING_STRC][PING_NONCE_SENT])
+
+
+def send_reject_and_check_if_banned(myself, target, pto):
+    return
+
+
+def address_refresh_broadcast(myself, pto):
+    if pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
+        push_address(pto, myself)
+        pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL)
+
+
+def send_addr(myself, target, pto):
+    if pto[ADDR_STRC][NEXT_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
+        pto[ADDR_STRC][NEXT_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_ADDRESS_BROADCAST_INTERVAL)
+        addr_to_send = []
+        for addr in pto[ADDR_STRC][ADDR_TO_SEND]:
+            if not has_addr(pto, addr):
+                add_addr(pto, addr)
+                addr_to_send.append(addr)
+                if len(addr_to_send) >= MAX_ADDR_MSG_SIZE:
+                    sim.send(ADDR, target, myself, addr_to_send)
+        pto[ADDR_STRC][ADDR_TO_SEND] = []
+        if addr_to_send:
+            sim.send(ADDR, target, myself, addr_to_send)
 
 
 def VERSION(myself, source):
@@ -101,6 +156,9 @@ def VERACK(myself, source):
 
     if should_log(myself):
         nodeState[myself][MSGS][VERACK_MSG] += 1
+
+
+def GETADDR(myself, source):
 
 
 def ADDR(myself, source):
@@ -151,10 +209,36 @@ def PONG(myself, source, nonce):
         pfrom[PING_STRC][PING_NONCE_SENT] = 0
 
 
+# Addr functions
+def add_addr(pto, addr):
+    if addr not in pto[ADDR_STRC][ADDR_KNOWN]:
+        pto[ADDR_STRC][ADDR_KNOWN].append(addr)
+
+
+def has_addr(pto, addr):
+    if addr in pto[ADDR_STRC][ADDR_KNOWN]:
+        return True
+    return False
+
+
+def push_address(pto, addr):
+    if not has_addr(pto, addr):
+        if len(pto[ADDR_STRC][ADDR_TO_SEND]) >= MAX_ADDR_MSG_SIZE:
+            i = random.randint(len(pto[ADDR_STRC][ADDR_TO_SEND]))
+            pto[ADDR_STRC][ADDR_TO_SEND][i] = addr
+        else:
+            pto[ADDR_STRC][ADDR_TO_SEND].append(addr)
+
+
 def should_log(myself):
     if (expert_log and INTERVAL < nodeState[myself][CURRENT_CYCLE] < nb_cycles - INTERVAL) or not expert_log:
         return True
     return False
+
+
+# Broadcast functions
+def poisson_next_send(now, avg_inc):
+        return now + avg_inc * random.randrange(1, 5)
 
 
 def new_connection(myself, source):
@@ -166,8 +250,7 @@ def new_connection(myself, source):
     if source in nodeState[myself][NODE_NEIGHBOURHOOD]:
         return
     else:
-        ping = [0, 0, 0, 0]
-        nodeState[myself][NODE_NEIGHBOURHOOD][source] = [ping]
+        nodeState[myself][NODE_NEIGHBOURHOOD][source] = create_neighbour(True)
 
 
 # --------------------------------------
@@ -213,12 +296,17 @@ def load_network(filename):
 def create_node(neighbourhood):
     current_cycle = 0
     msgs = [0, 0, 0, 0, 0]
-    ping = [0, 0, 0, 0]
     neighbourhood_dic = defaultdict()
     for neighbour in neighbourhood:
-        neighbourhood_dic[neighbour] = [ping]
+        neighbourhood_dic[neighbour] = create_neighbour(False)
 
     return [current_cycle, neighbourhood_dic, msgs]
+
+
+def create_neighbour(inbound):
+    ping = [0, 0, 0, 0]
+    addr = [0, [], []]
+    return [inbound, ping, addr]
 
 
 def create_nodes(neighbourhood_size):
