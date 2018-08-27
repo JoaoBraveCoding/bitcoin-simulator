@@ -23,7 +23,9 @@ import utils
 # Messages structures
 
 # Node structure
-CURRENT_CYCLE, NODE_NEIGHBOURHOOD, MSGS, NODES_TO_RELAY = 0, 1, 2, 3
+# NODES_TO_RELAY - cheat to avoid using a more specialized function
+# TODO update total_nodes
+CURRENT_CYCLE, MY_IP, RANDOM, NODE_NEIGHBOURHOOD, NODES_CONNECTED, TRIED_NEW, NODES_TO_RELAY, MSGS = 0, 1, 2, 3, 4, 5, 6, 7
 
 # Node neighbour structure
 F_INBOUND, F_SHOULD_BAN, TIME, PING_STRC, ADDR_STRC, MISBEHAVIOR = 0, 1, 2, 3, 4, 5
@@ -39,8 +41,12 @@ MAX_ADDR_MSG_SIZE = 1000
 
 BANSCORE = 100
 
+ADDRMAN_GETADDR_MAX_PCT = 23
+
+ADDRMAN_GETADDR_MAX = 2500
+
 # Addr message struct
-ADDR_ID, ADDR_TIME = 0, 1
+ADDR_ID, ADDR_IP, ADDR_TIME = 0, 1, 2
 
 # Ping structure
 PING_NONCE_SENT, PING_TIME_START, PING_TIME, BEST_PING_TIME = 0, 1, 2, 3
@@ -93,9 +99,11 @@ def CYCLE(myself):
     if nodeState[myself][CURRENT_CYCLE] % (24 * 60 * 60) == 0:
         update_relays(myself)
 
-    for node in nodeState[myself][NODE_NEIGHBOURHOOD]:
+    for node in nodeState[myself][NODES_CONNECTED]:
         cnode = nodeState[myself][NODE_NEIGHBOURHOOD][node]
         send_messages(myself, node, cnode)
+
+    # TODO implement feeler connections
 
     nodeState[myself][CURRENT_CYCLE] += 1
     # schedule next execution
@@ -107,7 +115,7 @@ def send_messages(myself, target, pto):
     # TODO check if we are successfully connected
     send_ping(myself, target, pto)
     send_reject_and_check_if_banned(myself, target, pto)
-    address_refresh_broadcast(myself, target, pto)
+    address_refresh_broadcast(myself, pto)
     send_addr(myself, target, pto)
 
 
@@ -125,12 +133,13 @@ def send_ping(myself, target, pto):
 
 
 def send_reject_and_check_if_banned(myself, target, pto):
+    # TODO implement
     return
 
 
 def address_refresh_broadcast(myself, pto):
     if pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
-        push_address(pto, myself)
+        push_address(pto, [myself, nodeState[myself][MY_IP], nodeState[myself][CURRENT_CYCLE]])
         pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL)
 
 
@@ -166,6 +175,18 @@ def VERACK(myself, source):
         nodeState[myself][MSGS][VERACK_MSG] += 1
 
 
+def swap_random(n, n_rad_pos):
+    pass
+
+
+def get_addr(param):
+    pass
+
+
+def is_terrible(addr):
+    pass
+
+
 def GETADDR(myself, source):
     global nodeState
 
@@ -184,8 +205,26 @@ def GETADDR(myself, source):
     pto[ADDR_STRC][F_SENT_ADDR] = True
 
     pto[ADDR_STRC][ADDR_TO_SEND] = []
-    addr_to_send = nodeState[myself][NODE_NEIGHBOURHOOD].keys()
-    for addr in addr_to_send:
+
+    # TODO REWORK this doesn't work like this
+    n_nodes = ADDRMAN_GETADDR_MAX_PCT * len(nodeState[myself][RANDOM]) / 100
+    if n_nodes > ADDRMAN_GETADDR_MAX:
+        n_nodes = ADDRMAN_GETADDR_MAX
+
+    v_addr = []
+    for n in range(0, len(nodeState[myself][RANDOM])):
+        if len(v_addr) > n_nodes:
+            break
+        n_rad_pos = random.randint(len(nodeState[myself][RANDOM]) - n) + n
+        # TODO write swap random, write get_addr, write random, write addr
+        swap_random(n, n_rad_pos)
+        addr = get_addr(nodeState[myself][RANDOM][n])
+        if not is_terrible(addr):
+            v_addr.append(addr)
+
+        n += 1
+
+    for addr in v_addr:
         push_address(pto, addr)
 
 
@@ -278,6 +317,9 @@ def has_addr(pto, addr):
 
 
 def push_address(pto, addr):
+    if len(addr) != 3:
+        raise ValueError("Size of the addr message invalid")
+
     if not has_addr(pto, addr):
         if len(pto[ADDR_STRC][ADDR_TO_SEND]) >= MAX_ADDR_MSG_SIZE:
             i = random.randint(len(pto[ADDR_STRC][ADDR_TO_SEND]))
@@ -328,7 +370,7 @@ def add_new_addr(myself, source, addr, time_penalty):
 
     if pto is not None:
         f_currently_online = (now - addr[TIME] < 24 * 60 * 60)
-        update_interval = 60 * 60 if f_currently_online else 24*60*60
+        update_interval = 60 * 60 if f_currently_online else 24 * 60 * 60
         if addr[TIME] and (not pto[TIME] or pto[TIME] < addr[TIME] - update_interval - time_penalty):
             pto[TIME] = max(0, addr[TIME] - time_penalty)
 
@@ -345,7 +387,6 @@ def add_new_addr(myself, source, addr, time_penalty):
         pto = nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]]
         pto[TIME] = max(0, pto[TIME] - time_penalty)
         f_new = True
-
 
 
 def misbehaving(myself, source, how_much):
@@ -365,7 +406,7 @@ def relay_address(myself, addr):
 
     # TODO might have to change
     if addr not in nodeState[myself][NODES_TO_RELAY]:
-        nodeState[myself][NODES_TO_RELAY][addr] = random.sample(nodeState[myself][NODE_NEIGHBOURHOOD].keys(), n_relay_nodes)
+        nodeState[myself][NODES_TO_RELAY][addr] = random.sample(nodeState[myself][NODES_CONNECTED], n_relay_nodes)
 
     for node in nodeState[myself][NODES_TO_RELAY][addr]:
         pto = nodeState[myself][NODE_NEIGHBOURHOOD][node]
@@ -374,12 +415,11 @@ def relay_address(myself, addr):
 
 def update_relays(myself):
     for addr in nodeState[myself][NODES_TO_RELAY]:
-        nodeState[myself][NODES_TO_RELAY][addr] = random.sample(nodeState[myself][NODE_NEIGHBOURHOOD].keys(), 2)
+        nodeState[myself][NODES_TO_RELAY][addr] = random.sample(nodeState[myself][NODES_CONNECTED], 2)
 
 
 def may_have_useful_address_db(addr):
     return
-
 
 
 # --------------------------------------
@@ -423,19 +463,28 @@ def load_network(filename):
 
 
 def create_node(neighbourhood):
+    # TODO give different ip's
+    ip = ''
     current_cycle = 0
-    msgs = [0, 0, 0, 0, 0]
+    msgs = [0] * 6
     neighbourhood_dic = defaultdict()
+    bucket = ['-1'] * 64
+    vv_tried = [bucket] * 256
+    vv_new = [bucket] * 1024
+    tried_new = [vv_tried, vv_new]
     for neighbour in neighbourhood:
         neighbourhood_dic[neighbour] = create_neighbour(False)
 
-    return [current_cycle, neighbourhood_dic, msgs]
+    return [current_cycle, ip, neighbourhood_dic, neighbourhood, tried_new, defaultdict(), msgs]
 
 
 def create_neighbour(inbound):
+    should_ban = False
+    time = 0
     ping = [0, 0, 0, 0]
     addr = [False, 0, 0, [], []]
-    return [inbound, ping, addr]
+    misbehaviour = 0
+    return [inbound, should_ban, time, ping, addr, misbehaviour]
 
 
 def create_nodes(neighbourhood_size):

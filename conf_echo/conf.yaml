@@ -6,13 +6,13 @@ NEIGHBOURHOOD_SIZE: 8
 NUMBER_OF_BAD_NODES: 0
 
 # Number of simulation cycles
-NUMBER_OF_CYCLES : 86400
+NUMBER_OF_CYCLES : 18000
 
 # Duration of node cycle
 NODE_CYCLE: 125
 
 # Log configurations
-EXPERT_LOG: True
+EXPERT_LOG: False
 
 # system settings, optional
 # whether to consider churn or not
