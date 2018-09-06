@@ -54,10 +54,10 @@ fi
 
 filename=$2
 
-
+pypy echo.py conf_echo/ $runId -sn True
 while [ "$i" -le "$cycles" ]
 do
-    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $currentBadNodes
+    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep
 
     if [ "$numberPararelism" -eq "-1" ]
     then
@@ -65,7 +65,7 @@ do
       then
         pypy echo.py conf_echo/ $runId -sn True
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $currentBadNodes
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep
       fi
     else
       if [ "$runId" -eq "1" ]
@@ -74,7 +74,7 @@ do
         pids[$runId]=$!
         sleep 10 
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $currentBadNodes & 
+        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep & 
         pids[$runId]=$!
       fi
       ((numberPararelism=numberPararelism-1))
