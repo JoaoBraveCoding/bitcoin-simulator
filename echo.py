@@ -157,16 +157,16 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
-        increase_relay(myself)
+    #if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
+    #    increase_relay(myself)
 
     # show progress for one node
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        # output.write('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        # output.flush()
-        print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.write('{} run: {} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        output.flush()
+        #print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -857,7 +857,7 @@ def generate_new_tx(myself):
         tx_created.append([0, 0])
     tx_commit.append([nodeState[myself][CURRENT_CYCLE], False])
     tx_created_after_last_block.append(new_tx)
-    nodeState[myself][MY_UNCONFIRMED_TX][new_tx] = nodeState[myself][CURRENT_CYCLE]
+    #nodeState[myself][MY_UNCONFIRMED_TX][new_tx] = nodeState[myself][CURRENT_CYCLE]
     tx_id += 1
 
 
