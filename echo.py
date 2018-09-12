@@ -31,7 +31,8 @@ CURRENT_CYCLE, MY_IP, KEY, RANDOM, NODE_NEIGHBOURHOOD, NODES_CONNECTED, TRIED_NE
 TRIED, NEW = 0, 1
 
 # Node neighbour structure
-F_INBOUND, F_IN_TRIED, F_SHOULD_BAN, IP, TIME, PING_STRC, ADDR_STRC, MISBEHAVIOR, REF_COUNT = 0, 1, 2, 3, 4, 5, 6, 7, 8
+F_INBOUND, F_IN_TRIED, F_SHOULD_BAN, IP, TIME, PING_STRC, ADDR_STRC, MISBEHAVIOR, REF_COUNT, LAST_TRY, ATTEMPTS, LAST_SUCCESS\
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 
 # Addr structure
 F_SENT_ADDR, F_GET_ADDR, NEXT_ADDR_SEND, NEXT_LOCAL_ADDR_SEND, ADDR_TO_SEND, ADDR_KNOWN = 0, 1, 2, 3, 4, 5
@@ -127,52 +128,6 @@ def CYCLE(myself):
         sim.schedulleExecution(CYCLE, myself)
 
 
-def send_messages(myself, target, pto):
-    send_ping(myself, target, pto)
-    send_reject_and_check_if_banned(myself, target, pto)
-    address_refresh_broadcast(myself, pto)
-    send_addr(myself, target, pto)
-
-
-def send_ping(myself, target, pto):
-    global ping_nonce
-
-    ping_send = False
-    if pto[PING_STRC][PING_NONCE_SENT] == 0 and pto[PING_STRC][PING_TIME_START] + PING_INTERVAL < nodeState[myself][CURRENT_CYCLE]:
-        ping_send = True
-    if ping_send:
-        pto[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_CYCLE]
-        pto[PING_STRC][PING_NONCE_SENT] = ping_nonce
-        ping_nonce += 1
-        sim.send(PING, target, myself, pto[PING_STRC][PING_NONCE_SENT])
-
-
-def send_reject_and_check_if_banned(myself, target, pto):
-    # TODO implement
-    return
-
-
-def address_refresh_broadcast(myself, pto):
-    if pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
-        push_address(pto, [myself, nodeState[myself][MY_IP], nodeState[myself][CURRENT_CYCLE]])
-        pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL)
-
-
-def send_addr(myself, target, pto):
-    if pto[ADDR_STRC][NEXT_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
-        pto[ADDR_STRC][NEXT_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_ADDRESS_BROADCAST_INTERVAL)
-        addr_to_send = []
-        for addr in pto[ADDR_STRC][ADDR_TO_SEND]:
-            if not has_addr(pto, addr):
-                add_addr(pto, addr)
-                addr_to_send.append(addr)
-                if len(addr_to_send) >= MAX_ADDR_MSG_SIZE:
-                    sim.send(ADDR, target, myself, addr_to_send)
-        pto[ADDR_STRC][ADDR_TO_SEND] = []
-        if addr_to_send:
-            sim.send(ADDR, target, myself, addr_to_send)
-
-
 def VERSION(myself, source):
     global nodeState
 
@@ -188,22 +143,6 @@ def VERACK(myself, source):
 
     if should_log(myself):
         nodeState[myself][MSGS][VERACK_MSG] += 1
-
-
-def swap_random(myself, n, n_rad_pos):
-    addr_1 = nodeState[myself][RANDOM][n]
-    addr_2 = nodeState[myself][RANDOM][n_rad_pos]
-    nodeState[myself][RANDOM][n] = addr_2
-    nodeState[myself][RANDOM][n_rad_pos] = addr_1
-
-
-def get_addr(myself, n):
-    cnode = nodeState[myself][NODE_NEIGHBOURHOOD][n]
-    return [n, cnode[IP], cnode[TIME]]
-
-
-def is_terrible(addr):
-    pass
 
 
 def GETADDR(myself, source):
@@ -236,7 +175,7 @@ def GETADDR(myself, source):
         n_rad_pos = random.randint(len(nodeState[myself][RANDOM]) - n) + n
         swap_random(myself, n, n_rad_pos)
         addr = get_addr(myself, nodeState[myself][RANDOM][n])
-        if not is_terrible(addr):
+        if not is_terrible(myself, addr[ADDR_ID]):
             v_addr.append(addr)
         n += 1
 
@@ -373,6 +312,11 @@ def add_new_addresses(myself, source, addr_ok, time_penalty):
         add_new_addr(myself, source, addr, time_penalty)
 
 
+def get_group(ip):
+    new_str = ip.split(".")
+    return new_str[1] + "." + new_str[2]
+
+
 def get_new_bucket(myself, key, addr, source):
     group = get_group(nodeState[myself][NODE_NEIGHBOURHOOD][source][IP])
     to_hash = str(key) + get_group(addr[IP]) + group
@@ -394,6 +338,16 @@ def get_bucket_position(key, new, bucket, addr):
     to_hash = str(key) + ('N' if new else 'K') + str(bucket) + addr[ADDR_ID]
     hash1 = (hashlib.sha256(to_hash)).hexdigest()
     return hash1 % ADDRMAN_BUCKET_SIZE
+
+
+def clear_new(myself, new, u_bucket, u_bucket_pos):
+    if new[u_bucket][u_bucket_pos] != -1:
+        id_delete = new[u_bucket][u_bucket_pos]
+        pto = nodeState[myself][NODE_NEIGHBOURHOOD][id_delete]
+        pto[REF_COUNT] -= 1
+        new[u_bucket][u_bucket_pos] = -1
+        # TODO delete if ...
+        # if pto[REF_COUNT] == 0:
 
 
 def add_new_addr(myself, source, addr, time_penalty):
@@ -442,11 +396,11 @@ def add_new_addr(myself, source, addr, time_penalty):
         insert = vv_new[u_bucket][u_bucket_pos] == -1
         if not insert:
             cnode = nodeState[myself][NODE_NEIGHBOURHOOD][vv_new[u_bucket][u_bucket_pos]]
-            if is_terrible(cnode) or cnode[REF_COUNT] > 1 and pto[REF_COUNT] == 0:
+            if is_terrible(myself, vv_new[u_bucket][u_bucket_pos]) or cnode[REF_COUNT] > 1 and pto[REF_COUNT] == 0:
                 insert = True
 
         if insert:
-            clear_new(u_bucket, u_bucket_pos)
+            clear_new(myself, vv_new, u_bucket, u_bucket_pos)
             pto[REF_COUNT] += 1
             vv_new[u_bucket][u_bucket_pos] = addr[ADDR_ID]
         else:
@@ -487,6 +441,85 @@ def update_relays(myself):
 
 def may_have_useful_address_db(addr):
     return
+
+
+def swap_random(myself, n, n_rad_pos):
+    addr_1 = nodeState[myself][RANDOM][n]
+    addr_2 = nodeState[myself][RANDOM][n_rad_pos]
+    nodeState[myself][RANDOM][n] = addr_2
+    nodeState[myself][RANDOM][n_rad_pos] = addr_1
+
+
+def get_addr(myself, n):
+    cnode = nodeState[myself][NODE_NEIGHBOURHOOD][n]
+    return [n, cnode[IP], cnode[TIME]]
+
+
+def is_terrible(myself, id):
+    pto = nodeState[myself][NODE_NEIGHBOURHOOD][id]
+    now = nodeState[myself][CURRENT_CYCLE]
+    if pto[LAST_TRY] and pto[LAST_TRY] >= now - 60:
+        return False
+
+    if pto[TIME] > now + 10 * 60:
+        return True
+
+    if pto[TIME] == 0 or now - pto[TIME] > 30 * 24 * 60 * 60:
+        return True
+
+    if pto[LAST_SUCCESS] == 0 and pto[ATTEMPTS] >= 3:
+        return True
+
+    if now - pto[LAST_SUCCESS] > 7 * 24 * 60 * 60 and pto[ATTEMPTS] >= 10:
+        return True
+
+    return False
+
+
+def send_messages(myself, target, pto):
+    send_ping(myself, target, pto)
+    send_reject_and_check_if_banned(myself, target, pto)
+    address_refresh_broadcast(myself, pto)
+    send_addr(myself, target, pto)
+
+
+def send_ping(myself, target, pto):
+    global ping_nonce
+
+    ping_send = False
+    if pto[PING_STRC][PING_NONCE_SENT] == 0 and pto[PING_STRC][PING_TIME_START] + PING_INTERVAL < nodeState[myself][CURRENT_CYCLE]:
+        ping_send = True
+    if ping_send:
+        pto[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_CYCLE]
+        pto[PING_STRC][PING_NONCE_SENT] = ping_nonce
+        ping_nonce += 1
+        sim.send(PING, target, myself, pto[PING_STRC][PING_NONCE_SENT])
+
+
+def send_reject_and_check_if_banned(myself, target, pto):
+    # TODO implement
+    return
+
+
+def address_refresh_broadcast(myself, pto):
+    if pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
+        push_address(pto, [myself, nodeState[myself][MY_IP], nodeState[myself][CURRENT_CYCLE]])
+        pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL)
+
+
+def send_addr(myself, target, pto):
+    if pto[ADDR_STRC][NEXT_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
+        pto[ADDR_STRC][NEXT_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_ADDRESS_BROADCAST_INTERVAL)
+        addr_to_send = []
+        for addr in pto[ADDR_STRC][ADDR_TO_SEND]:
+            if not has_addr(pto, addr):
+                add_addr(pto, addr)
+                addr_to_send.append(addr)
+                if len(addr_to_send) >= MAX_ADDR_MSG_SIZE:
+                    sim.send(ADDR, target, myself, addr_to_send)
+        pto[ADDR_STRC][ADDR_TO_SEND] = []
+        if addr_to_send:
+            sim.send(ADDR, target, myself, addr_to_send)
 
 
 # --------------------------------------
@@ -536,7 +569,7 @@ def create_node(neighbourhood):
     key = random.randint()
     msgs = [0] * 6
     neighbourhood_dic = defaultdict()
-    bucket = ['-1'] * 64
+    bucket = [-1] * 64
     vv_tried = [bucket] * 256
     vv_new = [bucket] * 1024
     tried_new = [vv_tried, vv_new]
@@ -555,7 +588,10 @@ def create_neighbour(inbound):
     addr = [False, 0, 0, [], []]
     misbehaviour = 0
     ref_count = 0
-    return [inbound, in_tried, should_ban, ip, time, ping, addr, misbehaviour, ref_count]
+    last_try = 0
+    attempts = 0
+    last_success = 0
+    return [inbound, in_tried, should_ban, ip, time, ping, addr, misbehaviour, ref_count, last_try, attempts, last_success]
 
 
 def create_nodes(neighbourhood_size):
