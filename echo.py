@@ -26,7 +26,8 @@ import utils
 # Node structure
 # NODES_TO_RELAY - cheat to avoid using a more specialized function
 # TODO update total_nodes
-CURRENT_CYCLE, MY_IP, KEY, RANDOM, NODE_NEIGHBOURHOOD, NODES_CONNECTED, TRIED_NEW, NODES_TO_RELAY, MSGS = 0, 1, 2, 3, 4, 5, 6, 7, 8
+CURRENT_CYCLE, MY_IP, KEY, RANDOM, NODE_NEIGHBOURHOOD, NODES_CONNECTED, TRIED_NEW, NODES_TO_RELAY, TRIED_COLLISIONS, MSGS \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 TRIED, NEW = 0, 1
 
@@ -60,6 +61,8 @@ ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP = 64
 ADDRMAN_BUCKET_SIZE = 64
 
 ADDRMAN_NEW_BUCKETS_PER_ADDRESS = 8
+
+ADDRMAN_SET_TRIED_COLLISION_SIZE = 10
 
 # Addr message struct
 ADDR_ID, ADDR_IP, ADDR_TIME = 0, 1, 2
@@ -112,11 +115,18 @@ def CYCLE(myself):
         #output.flush()
         print('{} id: {} cycle: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
 
+    # Cheat to avoid using a deterministic function to know which nodes will we send addr's
     if nodeState[myself][CURRENT_CYCLE] % (24 * 60 * 60) == 0:
         update_relays(myself)
 
+    # Make nodes send the version message to their neighbours when they come online
+    # TODO make this work with nodes coming online at different times
     for node in nodeState[myself][NODES_CONNECTED]:
-        # TODO check if we are successfully connected, this is probably already assured with iterating NODES_CONNECTED
+        create_neighbour_structures(myself, node, False)
+        sim.send(VERSION, node, myself)
+
+    # Main cycle to dispatch messages on nodes which we are connected to
+    for node in nodeState[myself][NODES_CONNECTED]:
         cnode = nodeState[myself][NODE_NEIGHBOURHOOD][node]
         send_messages(myself, node, cnode)
 
@@ -133,7 +143,33 @@ def VERSION(myself, source):
 
     if should_log(myself):
         nodeState[myself][MSGS][VERSION_MSG] += 1
-    new_connection(myself, source)
+
+    # Node connects to itself case, there's a condition in the Bitcoin code for this
+    if myself == source:
+        return
+
+    create_neighbour_structures(myself, source, False)
+
+    pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
+
+    if pto[F_INBOUND]:
+        sim.send(VERSION, source, myself)
+
+    sim.send(VERACK, source, myself)
+
+    if not pto[F_INBOUND]:
+        addr = get_local_address(myself)
+        push_address(pto, addr)
+
+        if len(nodeState[myself][RANDOM]) < 1000:
+            sim.send(GETADDR, source, myself)
+            pto[ADDR_STRC][F_GET_ADDR] = True
+
+        mark_address_as_good(myself, source, True, nodeState[myself][CURRENT_CYCLE])
+
+    # TODO implement feeler
+
+    return True
 
 
 def VERACK(myself, source):
@@ -144,11 +180,15 @@ def VERACK(myself, source):
     if should_log(myself):
         nodeState[myself][MSGS][VERACK_MSG] += 1
 
+    pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
+    if not pto[F_INBOUND]:
+        nodeState[myself][NODES_CONNECTED].append(source)
+
 
 def GETADDR(myself, source):
     global nodeState
 
-    # TODO prevent nodes from starting communications with this message in case that could happen
+    check_if_connected(myself, source)
 
     if should_log(myself):
         nodeState[myself][MSGS][GET_ADDR_MSG] += 1
@@ -186,7 +226,7 @@ def GETADDR(myself, source):
 def ADDR(myself, source, addrs):
     global nodeState
 
-    # TODO prevent nodes from starting communications with this message in case that could happen
+    check_if_connected(myself, source)
 
     now = nodeState[myself][CURRENT_CYCLE]
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
@@ -222,7 +262,7 @@ def ADDR(myself, source, addrs):
 def PING(myself, source, nonce):
     global nodeState
 
-    # TODO prevent nodes from starting communications with this message in case that could happen
+    check_if_connected(myself, source)
 
     if should_log(myself):
         nodeState[myself][MSGS][PING_MSG] += 1
@@ -233,7 +273,8 @@ def PING(myself, source, nonce):
 def PONG(myself, source, nonce):
     global nodeState
 
-    # TODO prevent nodes from starting communications with this message in case that could happen
+    check_if_connected(myself, source)
+
     if should_log(myself):
         nodeState[myself][MSGS][PONG_MSG] += 1
 
@@ -258,6 +299,75 @@ def PONG(myself, source, nonce):
         pfrom[PING_STRC][PING_NONCE_SENT] = 0
 
 
+def check_if_connected(myself, source):
+    if source not in nodeState[myself][NODES_CONNECTED]:
+        raise ValueError("Node not connected trying to communicate")
+
+
+def get_local_address(myself):
+    return [myself, nodeState[myself][CURRENT_CYCLE]]
+
+
+def make_tried(myself, source):
+    new = nodeState[myself][TRIED_NEW][NEW]
+    for bucket in range(0, ADDRMAN_NEW_BUCKET_COUNT):
+        pos = get_bucket_position(nodeState[myself][KEY], True, bucket, source)
+        if new[bucket][pos] == source:
+            new[bucket][pos] = -1
+            nodeState[myself][NODE_NEIGHBOURHOOD][source][REF_COUNT] -= 1
+
+    if nodeState[myself][NODE_NEIGHBOURHOOD][source][REF_COUNT] != 0:
+        raise ValueError("This should be 0")
+
+    k_bucket = get_tried_bucket(nodeState[myself][KEY], source)
+    k_bucket_pos = get_bucket_position(nodeState[myself][KEY], False, k_bucket, source)
+    tried = nodeState[myself][TRIED_NEW][TRIED]
+    if tried[k_bucket][k_bucket_pos] != -1:
+        id_evict = tried[k_bucket][k_bucket_pos]
+        old_pto = nodeState[myself][NODE_NEIGHBOURHOOD][id_evict]
+        old_pto[F_IN_TRIED] = False
+        tried[k_bucket][k_bucket_pos] = -1
+
+        u_bucket = get_new_bucket(myself, nodeState[myself][KEY], source)
+        u_bucket_pos = get_bucket_position(nodeState[myself][KEY], True, u_bucket, source)
+        clear_new(myself, u_bucket, u_bucket_pos)
+
+
+def mark_address_as_good(myself, source, test_before_evict, time):
+
+    if source not in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        return
+
+    pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
+    pto[LAST_SUCCESS] = time
+    pto[LAST_TRY] = time
+    pto[ATTEMPTS] = 0
+
+    if pto[F_IN_TRIED]:
+        return
+
+    rnd = random.randint(ADDRMAN_NEW_BUCKET_COUNT)
+    u_bucket = -1
+    for n in range(0, ADDRMAN_NEW_BUCKET_COUNT):
+        b = (n + rnd) % ADDRMAN_NEW_BUCKET_COUNT
+        b_pos = get_bucket_position(nodeState[myself][KEY], True, b, source)
+        new = nodeState[myself][TRIED_NEW][NEW]
+        if new[b][b_pos] == source:
+            u_bucket = b
+
+    if u_bucket == -1:
+        raise ValueError("This shouldn't be happening")
+
+    tried_bucket = get_tried_bucket(nodeState[myself][KEY], source)
+    tried_bucket_pos = get_bucket_position(nodeState[myself][KEY], False, tried_bucket, source)
+    tried = nodeState[myself][TRIED_NEW][TRIED]
+    if test_before_evict and tried[tried_bucket][tried_bucket_pos] != -1:
+        if len(nodeState[myself][TRIED_COLLISIONS]) < ADDRMAN_SET_TRIED_COLLISION_SIZE:
+            nodeState[myself][TRIED_COLLISIONS].append(source)
+    else:
+        make_tried(myself, source)
+
+
 # Neighbour addr functions
 def add_addr(pto, addr):
     if addr not in pto[ADDR_STRC][ADDR_KNOWN]:
@@ -271,7 +381,7 @@ def has_addr(pto, addr):
 
 
 def push_address(pto, addr):
-    if len(addr) != 3:
+    if len(addr) != 2:
         raise ValueError("Size of the addr message invalid")
 
     if not has_addr(pto, addr):
@@ -282,29 +392,23 @@ def push_address(pto, addr):
             pto[ADDR_STRC][ADDR_TO_SEND].append(addr)
 
 
-def should_log(myself):
-    if (expert_log and INTERVAL < nodeState[myself][CURRENT_CYCLE] < nb_cycles - INTERVAL) or not expert_log:
-        return True
-    return False
-
-
 # Broadcast functions
 def poisson_next_send(now, avg_inc):
         return now + avg_inc * random.randrange(1, 5)
 
 
 # Membership functions
-def new_connection(myself, addr):
+def create_neighbour_structures(myself, addr, inbound):
     global nodeState
 
-    if len(nodeState[myself][NODE_NEIGHBOURHOOD]) > 125:
-        raise ValueError("Number of connections in one node exceed the maximum allowed")
-
+    # No point in doing this if the node already exists
     if addr[ADDR_ID] in nodeState[myself][NODE_NEIGHBOURHOOD]:
         return
-    else:
-        nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]] = create_neighbour(True)
-        nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]][TIME] = addr[ADDR_TIME]
+
+    if len(nodeState[myself][NODES_CONNECTED]) == 125:
+        raise ValueError("Number of connections in one node exceed the maximum allowed")
+
+    nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]] = create_neighbour(inbound)
 
 
 def add_new_addresses(myself, source, addr_ok, time_penalty):
@@ -340,7 +444,8 @@ def get_bucket_position(key, new, bucket, addr):
     return hash1 % ADDRMAN_BUCKET_SIZE
 
 
-def clear_new(myself, new, u_bucket, u_bucket_pos):
+def clear_new(myself, u_bucket, u_bucket_pos):
+    new = nodeState[myself][TRIED_NEW][NEW]
     if new[u_bucket][u_bucket_pos] != -1:
         id_delete = new[u_bucket][u_bucket_pos]
         pto = nodeState[myself][NODE_NEIGHBOURHOOD][id_delete]
@@ -351,7 +456,6 @@ def clear_new(myself, new, u_bucket, u_bucket_pos):
 
 
 def add_new_addr(myself, source, addr, time_penalty):
-
     f_new = False
     now = nodeState[myself][CURRENT_CYCLE]
     pto = None
@@ -384,7 +488,7 @@ def add_new_addr(myself, source, addr, time_penalty):
         if n_factor > 1 and random.randint(n_factor) != 0:
             return False
     else:
-        new_connection(myself, addr)
+        create_neighbour_structures(myself, addr, None)
         pto = nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]]
         pto[TIME] = max(0, pto[TIME] - time_penalty)
         f_new = True
@@ -476,6 +580,8 @@ def is_terrible(myself, id):
     return False
 
 
+# --------------------------------------
+# Cycle functions
 def send_messages(myself, target, pto):
     send_ping(myself, target, pto)
     send_reject_and_check_if_banned(myself, target, pto)
@@ -520,6 +626,13 @@ def send_addr(myself, target, pto):
         pto[ADDR_STRC][ADDR_TO_SEND] = []
         if addr_to_send:
             sim.send(ADDR, target, myself, addr_to_send)
+# --------------------------------------
+
+
+def should_log(myself):
+    if (expert_log and INTERVAL < nodeState[myself][CURRENT_CYCLE] < nb_cycles - INTERVAL) or not expert_log:
+        return True
+    return False
 
 
 # --------------------------------------
@@ -580,8 +693,8 @@ def create_node(neighbourhood):
 
 
 def create_neighbour(inbound):
-    should_ban = False
     in_tried = False
+    should_ban = False
     ip = ''
     time = 0
     ping = [0, 0, 0, 0]
