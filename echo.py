@@ -65,7 +65,7 @@ ADDRMAN_NEW_BUCKETS_PER_ADDRESS = 8
 ADDRMAN_SET_TRIED_COLLISION_SIZE = 10
 
 # Addr message struct
-ADDR_ID, ADDR_IP, ADDR_TIME = 0, 1, 2
+ADDR_ID, ADDR_TIME = 0, 1
 
 # Ping structure
 PING_NONCE_SENT, PING_TIME_START, PING_TIME, BEST_PING_TIME = 0, 1, 2, 3
@@ -158,7 +158,7 @@ def VERSION(myself, source):
     sim.send(VERACK, source, myself)
 
     if not pto[F_INBOUND]:
-        addr = get_local_address(myself)
+        addr = get_addr(myself)
         push_address(pto, addr)
 
         if len(nodeState[myself][RANDOM]) < 1000:
@@ -304,10 +304,6 @@ def check_if_connected(myself, source):
         raise ValueError("Node not connected trying to communicate")
 
 
-def get_local_address(myself):
-    return [myself, nodeState[myself][CURRENT_CYCLE]]
-
-
 def make_tried(myself, source):
     new = nodeState[myself][TRIED_NEW][NEW]
     for bucket in range(0, ADDRMAN_NEW_BUCKET_COUNT):
@@ -368,16 +364,24 @@ def mark_address_as_good(myself, source, test_before_evict, time):
         make_tried(myself, source)
 
 
-# Neighbour addr functions
+# --------------------------------------
+# Addr functions
 def add_addr(pto, addr):
     if addr not in pto[ADDR_STRC][ADDR_KNOWN]:
-        pto[ADDR_STRC][ADDR_KNOWN].append(addr)
+        pto[ADDR_STRC][ADDR_KNOWN][addr[ADDR_ID]] = addr[ADDR_TIME]
 
 
 def has_addr(pto, addr):
     if addr in pto[ADDR_STRC][ADDR_KNOWN]:
         return True
     return False
+
+
+def get_addr(myself, n=None):
+    if n is None:
+        return [myself, nodeState[myself][CURRENT_CYCLE]]
+    cnode = nodeState[myself][NODE_NEIGHBOURHOOD][n]
+    return [n, cnode[TIME]]
 
 
 def push_address(pto, addr):
@@ -392,67 +396,9 @@ def push_address(pto, addr):
             pto[ADDR_STRC][ADDR_TO_SEND].append(addr)
 
 
-# Broadcast functions
-def poisson_next_send(now, avg_inc):
-        return now + avg_inc * random.randrange(1, 5)
-
-
-# Membership functions
-def create_neighbour_structures(myself, addr, inbound):
-    global nodeState
-
-    # No point in doing this if the node already exists
-    if addr[ADDR_ID] in nodeState[myself][NODE_NEIGHBOURHOOD]:
-        return
-
-    if len(nodeState[myself][NODES_CONNECTED]) == 125:
-        raise ValueError("Number of connections in one node exceed the maximum allowed")
-
-    nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]] = create_neighbour(inbound)
-
-
 def add_new_addresses(myself, source, addr_ok, time_penalty):
     for addr in addr_ok:
         add_new_addr(myself, source, addr, time_penalty)
-
-
-def get_group(ip):
-    new_str = ip.split(".")
-    return new_str[1] + "." + new_str[2]
-
-
-def get_new_bucket(myself, key, addr, source):
-    group = get_group(nodeState[myself][NODE_NEIGHBOURHOOD][source][IP])
-    to_hash = str(key) + get_group(addr[IP]) + group
-    hash1 = (hashlib.sha256(to_hash)).hexdigest()
-    to_hash = str(key) + group + str(hash1 % ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP)
-    hash2 = (hashlib.sha256(to_hash)).hexdigest()
-    return hash2 % ADDRMAN_NEW_BUCKET_COUNT
-
-
-def get_tried_bucket(key, addr):
-    to_hash = str(key) + addr[ADDR_ID]
-    hash1 = (hashlib.sha256(to_hash)).hexdigest()
-    to_hash = str(key) + get_group(addr[IP]) + str(hash1 % ADDRMAN_TRIED_BUCKETS_PER_GROUP)
-    hash2 = (hashlib.sha256(to_hash)).hexdigest()
-    return hash2 % ADDRMAN_TRIED_BUCKET_COUNT
-
-
-def get_bucket_position(key, new, bucket, addr):
-    to_hash = str(key) + ('N' if new else 'K') + str(bucket) + addr[ADDR_ID]
-    hash1 = (hashlib.sha256(to_hash)).hexdigest()
-    return hash1 % ADDRMAN_BUCKET_SIZE
-
-
-def clear_new(myself, u_bucket, u_bucket_pos):
-    new = nodeState[myself][TRIED_NEW][NEW]
-    if new[u_bucket][u_bucket_pos] != -1:
-        id_delete = new[u_bucket][u_bucket_pos]
-        pto = nodeState[myself][NODE_NEIGHBOURHOOD][id_delete]
-        pto[REF_COUNT] -= 1
-        new[u_bucket][u_bucket_pos] = -1
-        # TODO delete if ...
-        # if pto[REF_COUNT] == 0:
 
 
 def add_new_addr(myself, source, addr, time_penalty):
@@ -514,15 +460,46 @@ def add_new_addr(myself, source, addr, time_penalty):
     return f_new
 
 
-def misbehaving(myself, source, how_much):
-    if how_much == 0:
-        return
+def get_new_bucket(myself, key, addr, source):
+    group = get_group(nodeState[myself][NODE_NEIGHBOURHOOD][source][IP])
+    to_hash = str(key) + get_group(addr[IP]) + group
+    hash1 = (hashlib.sha256(to_hash)).hexdigest()
+    to_hash = str(key) + group + str(hash1 % ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP)
+    hash2 = (hashlib.sha256(to_hash)).hexdigest()
+    return hash2 % ADDRMAN_NEW_BUCKET_COUNT
 
-    pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
-    pto[MISBEHAVIOR] += how_much
-    if pto[MISBEHAVIOR] - how_much < BANSCORE <= pto[MISBEHAVIOR]:
-        pto[F_SHOULD_BAN] = True
-    return
+
+def get_tried_bucket(key, addr):
+    to_hash = str(key) + addr[ADDR_ID]
+    hash1 = (hashlib.sha256(to_hash)).hexdigest()
+    to_hash = str(key) + get_group(addr[IP]) + str(hash1 % ADDRMAN_TRIED_BUCKETS_PER_GROUP)
+    hash2 = (hashlib.sha256(to_hash)).hexdigest()
+    return hash2 % ADDRMAN_TRIED_BUCKET_COUNT
+
+
+def get_bucket_position(key, new, bucket, addr):
+    to_hash = str(key) + ('N' if new else 'K') + str(bucket) + addr[ADDR_ID]
+    hash1 = (hashlib.sha256(to_hash)).hexdigest()
+    return hash1 % ADDRMAN_BUCKET_SIZE
+
+
+def clear_new(myself, u_bucket, u_bucket_pos):
+    new = nodeState[myself][TRIED_NEW][NEW]
+    if new[u_bucket][u_bucket_pos] != -1:
+        id_delete = new[u_bucket][u_bucket_pos]
+        pto = nodeState[myself][NODE_NEIGHBOURHOOD][id_delete]
+        pto[REF_COUNT] -= 1
+        new[u_bucket][u_bucket_pos] = -1
+        # TODO delete if ...
+        # if pto[REF_COUNT] == 0:
+
+# --------------------------------------
+
+
+# --------------------------------------
+# Broadcast functions
+def poisson_next_send(now, avg_inc):
+        return now + avg_inc * random.randrange(1, 5)
 
 
 def relay_address(myself, addr):
@@ -541,6 +518,14 @@ def relay_address(myself, addr):
 def update_relays(myself):
     for addr in nodeState[myself][NODES_TO_RELAY]:
         nodeState[myself][NODES_TO_RELAY][addr] = random.sample(nodeState[myself][NODES_CONNECTED], 2)
+# --------------------------------------
+
+
+# --------------------------------------
+# Misc functions
+def get_group(ip):
+    new_str = ip.split(".")
+    return new_str[1] + "." + new_str[2]
 
 
 def may_have_useful_address_db(addr):
@@ -554,9 +539,16 @@ def swap_random(myself, n, n_rad_pos):
     nodeState[myself][RANDOM][n_rad_pos] = addr_1
 
 
-def get_addr(myself, n):
-    cnode = nodeState[myself][NODE_NEIGHBOURHOOD][n]
-    return [n, cnode[IP], cnode[TIME]]
+# Neighbours quality
+def misbehaving(myself, source, how_much):
+    if how_much == 0:
+        return
+
+    pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
+    pto[MISBEHAVIOR] += how_much
+    if pto[MISBEHAVIOR] - how_much < BANSCORE <= pto[MISBEHAVIOR]:
+        pto[F_SHOULD_BAN] = True
+    return
 
 
 def is_terrible(myself, id):
@@ -705,6 +697,19 @@ def create_neighbour(inbound):
     attempts = 0
     last_success = 0
     return [inbound, in_tried, should_ban, ip, time, ping, addr, misbehaviour, ref_count, last_try, attempts, last_success]
+
+
+def create_neighbour_structures(myself, addr, inbound):
+    global nodeState
+
+    # No point in doing this if the node already exists
+    if addr[ADDR_ID] in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        return
+
+    if len(nodeState[myself][NODES_CONNECTED]) == 125:
+        raise ValueError("Number of connections in one node exceed the maximum allowed")
+
+    nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]] = create_neighbour(inbound)
 
 
 def create_nodes(neighbourhood_size):
