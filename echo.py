@@ -29,8 +29,8 @@ import utils
 # Node structure
 # NODES_TO_RELAY - cheat to avoid using a more specialized function
 # TODO update total_nodes
-CURRENT_CYCLE, KEY, RANDOM, NODE_NEIGHBOURHOOD, NODES_CONNECTED, TRIED_NEW, NODES_TO_RELAY, TRIED_COLLISIONS, MSGS \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8
+CURRENT_CYCLE, CURRENT_TIME, KEY, RANDOM, NODE_NEIGHBOURHOOD, NODES_CONNECTED, TRIED_NEW, NODES_TO_RELAY, TRIED_COLLISIONS, MSGS \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 N_TRIED, TRIED, N_NEW, NEW = 0, 1, 2, 3
 
@@ -110,20 +110,20 @@ def connect_node(myself, addr_connect):
     pto[REF_COUNT] += 1
 
 
-def initialize_node(myself, addr_connect):
+def initialize_node(myself, addr_connect, inbound):
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][addr_connect]
+    pto[F_INBOUND] = inbound
     if pto[F_INBOUND]:
         sim.send(VERSION, addr_connect, myself)
 
 
-def open_network_connection(myself, addr_connect, feeler):
+def open_network_connection(myself, addr_connect, feeler, inbound):
     connect_node(myself, addr_connect)
-    nodeState[myself][NODES_CONNECTED].append(addr_connect)
-    initialize_node(myself, addr_connect)
+    initialize_node(myself, addr_connect, inbound)
 
 
 def get_chance(myself, id):
-    now = nodeState[myself][CURRENT_CYCLE]
+    now = nodeState[myself][CURRENT_TIME]
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][id]
     chance = 1.0
     since_last_try = max(now - pto[LAST_TRY], 0)
@@ -161,22 +161,32 @@ def select(myself, new_only):
                 return id
             chance_factor *= 1.2
     else:
-        u_bucket = random.randint(ADDRMAN_NEW_BUCKET_COUNT)
-        u_bucket_pos = random.randint(ADDRMAN_BUCKET_SIZE)
+        u_bucket = random.randint(0, ADDRMAN_NEW_BUCKET_COUNT-1)
+        u_bucket_pos = random.randint(0, ADDRMAN_BUCKET_SIZE-1)
         while new[u_bucket][u_bucket_pos] == -1:
             u_bucket = (u_bucket + random.getrandbits(10)) % ADDRMAN_NEW_BUCKET_COUNT
             u_bucket_pos = (u_bucket_pos + random.getrandbits(6)) % ADDRMAN_BUCKET_SIZE
         id = new[u_bucket][u_bucket_pos]
-        if random.randint(1073741824) < chance_factor * get_chance(myself, id) * 1073741824:
+        if random.randint(0, 1073741824) < chance_factor * get_chance(myself, id) * 1073741824:
             return id
         chance_factor *= 1.2
 
 
 def open_connections(myself):
+    # TODO REMOVE ONCE FEELER IMPLEMENTED TEMPORARY
+    counter = 0
+    for node in nodeState[myself][NODES_CONNECTED]:
+        if not nodeState[myself][NODE_NEIGHBOURHOOD][node][F_INBOUND]:
+            counter += 1
+
+    if counter >= 8:
+        return
+    # _____________________________
+
     feeler = False
     addr_connect = None
     # resolve_collisions(myself)
-    now = nodeState[myself][CURRENT_CYCLE]
+    now = nodeState[myself][CURRENT_TIME]
     tries = 0
     while True:
         # addr = select_tried_colision(myself)
@@ -196,10 +206,10 @@ def open_connections(myself):
         addr_connect = addr
         break
 
-    if not feeler:
-        raise ValueError("TO implement")
+    #if not feeler:
+    #    raise ValueError("TO implement")
 
-    open_network_connection(myself, addr_connect, feeler)
+    open_network_connection(myself, addr_connect, feeler, False)
 
 
 def CYCLE(myself):
@@ -209,15 +219,8 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    # Skip early days,
-    if nodeState[myself][CURRENT_CYCLE] > 432000:
-        nodeState[myself][CURRENT_CYCLE] += 1
-        if nodeState[myself][CURRENT_CYCLE] < nb_cycles:
-            sim.schedulleExecution(CYCLE, myself)
-        return
-
     # show progress for one node
-    if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
+    if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 43200 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
         #output.write('{} id: {} cycle: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId, nodeState[myself][CURRENT_CYCLE]))
@@ -240,6 +243,7 @@ def CYCLE(myself):
     # TODO implement feeler connections
 
     nodeState[myself][CURRENT_CYCLE] += 1
+    nodeState[myself][CURRENT_TIME] += 1
     # schedule next execution
     if nodeState[myself][CURRENT_CYCLE] < nb_cycles:
         sim.schedulleExecution(CYCLE, myself)
@@ -254,6 +258,10 @@ def VERSION(myself, source):
     # Node connects to itself case, there's a condition in the Bitcoin code for this
     if myself == source:
         return
+
+    if source not in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        add_new_addr(myself, source, source, 0)
+        open_network_connection(myself, source, False)
 
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
 
@@ -270,7 +278,7 @@ def VERSION(myself, source):
             sim.send(GETADDR, source, myself)
             pto[ADDR_STRC][F_GET_ADDR] = True
 
-        mark_address_as_good(myself, source, True, nodeState[myself][CURRENT_CYCLE])
+        mark_address_as_good(myself, source, True, nodeState[myself][CURRENT_TIME])
 
     # TODO implement feeler
 
@@ -286,8 +294,7 @@ def VERACK(myself, source):
         nodeState[myself][MSGS][VERACK_MSG] += 1
 
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
-    if not pto[F_INBOUND]:
-        nodeState[myself][NODES_CONNECTED].append(source)
+    nodeState[myself][NODES_CONNECTED].append(source)
 
 
 def GETADDR(myself, source):
@@ -333,7 +340,7 @@ def ADDR(myself, source, addrs):
 
     check_if_connected(myself, source)
 
-    now = nodeState[myself][CURRENT_CYCLE]
+    now = nodeState[myself][CURRENT_TIME]
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
 
     if should_log(myself):
@@ -384,7 +391,7 @@ def PONG(myself, source, nonce):
         nodeState[myself][MSGS][PONG_MSG] += 1
 
     pfrom = nodeState[myself][NODE_NEIGHBOURHOOD][source]
-    ping_time_end = nodeState[myself][CURRENT_CYCLE]
+    ping_time_end = nodeState[myself][CURRENT_TIME]
     b_ping_finished = False
 
     if pfrom[PING_STRC][PING_NONCE_SENT] != 0:
@@ -411,12 +418,11 @@ def check_if_connected(myself, source):
 
 def make_tried(myself, source):
     new = nodeState[myself][TRIED_NEW][NEW]
-    n_new = nodeState[myself][TRIED_NEW][N_NEW]
     for bucket in range(0, ADDRMAN_NEW_BUCKET_COUNT):
         pos = get_bucket_position(nodeState[myself][KEY], True, bucket, source)
         if new[bucket][pos] == source:
             new[bucket][pos] = -1
-            n_new -= 1
+            nodeState[myself][TRIED_NEW][N_NEW] -= 1
             nodeState[myself][NODE_NEIGHBOURHOOD][source][REF_COUNT] -= 1
 
     if nodeState[myself][NODE_NEIGHBOURHOOD][source][REF_COUNT] != 0:
@@ -425,13 +431,12 @@ def make_tried(myself, source):
     k_bucket = get_tried_bucket(nodeState[myself][KEY], source)
     k_bucket_pos = get_bucket_position(nodeState[myself][KEY], False, k_bucket, source)
     tried = nodeState[myself][TRIED_NEW][TRIED]
-    n_tried = nodeState[myself][TRIED_NEW][N_TRIED]
     if tried[k_bucket][k_bucket_pos] != -1:
         id_evict = tried[k_bucket][k_bucket_pos]
         old_pto = nodeState[myself][NODE_NEIGHBOURHOOD][id_evict]
         old_pto[F_IN_TRIED] = False
         tried[k_bucket][k_bucket_pos] = -1
-        n_tried -= 1
+        nodeState[myself][TRIED_NEW][N_TRIED] -= 1
 
         u_bucket = get_new_bucket(nodeState[myself][KEY], source, nodeState[myself][NODE_NEIGHBOURHOOD][source][SOURCE])
         u_bucket_pos = get_bucket_position(nodeState[myself][KEY], True, u_bucket, source)
@@ -439,10 +444,10 @@ def make_tried(myself, source):
 
         old_pto[REF_COUNT] = 1
         new[u_bucket][u_bucket_pos] = id_evict
-        n_new += 1
+        nodeState[myself][TRIED_NEW][N_NEW] += 1
 
     tried[k_bucket][k_bucket_pos] = source
-    n_tried += 1
+    nodeState[myself][TRIED_NEW][N_TRIED] += 1
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][source]
     pto[F_IN_TRIED] = True
 
@@ -497,7 +502,7 @@ def has_addr(pto, addr):
 
 def get_addr(myself, n=None):
     if n is None:
-        return [myself, nodeState[myself][CURRENT_CYCLE]]
+        return [myself, nodeState[myself][CURRENT_TIME]]
     cnode = nodeState[myself][NODE_NEIGHBOURHOOD][n]
     return [n, cnode[TIME]]
 
@@ -519,9 +524,18 @@ def add_new_addresses(myself, source, addr_ok, time_penalty):
         add_new_addr(myself, source, addr, time_penalty)
 
 
+def delete(myself, id):
+    if id in nodeState[myself][NODE_NEIGHBOURHOOD]:
+        pto = nodeState[myself][NODE_NEIGHBOURHOOD][id]
+        if not pto[F_IN_TRIED] and pto[REF_COUNT] == 0:
+            nodeState[myself][RANDOM].remove(id)
+            del nodeState[myself][NODE_NEIGHBOURHOOD][id]
+            nodeState[myself][TRIED_NEW][N_NEW] -= 1
+
+
 def add_new_addr(myself, source, addr, time_penalty):
     f_new = False
-    now = nodeState[myself][CURRENT_CYCLE]
+    now = nodeState[myself][CURRENT_TIME]
     pto = None
     if addr[ADDR_ID] in nodeState[myself][NODE_NEIGHBOURHOOD]:
         pto = nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]]
@@ -530,12 +544,12 @@ def add_new_addr(myself, source, addr, time_penalty):
         time_penalty = 0
 
     if pto is not None:
-        f_currently_online = (now - addr[TIME] < 24 * 60 * 60)
+        f_currently_online = (now - addr[ADDR_TIME] < 24 * 60 * 60)
         update_interval = 60 * 60 if f_currently_online else 24 * 60 * 60
-        if addr[TIME] and (not pto[TIME] or pto[TIME] < addr[TIME] - update_interval - time_penalty):
-            pto[TIME] = max(0, addr[TIME] - time_penalty)
+        if addr[ADDR_TIME] and (not pto[TIME] or pto[TIME] < addr[ADDR_TIME] - update_interval - time_penalty):
+            pto[TIME] = max(0, addr[ADDR_TIME] - time_penalty)
 
-        if not addr[TIME] or (pto[TIME] and addr[TIME] <= pto[TIME]):
+        if not addr[ADDR_TIME] or (pto[TIME] and addr[ADDR_TIME] <= pto[TIME]):
             return False
 
         if pto[F_IN_TRIED]:
@@ -549,10 +563,10 @@ def add_new_addr(myself, source, addr, time_penalty):
         while n < pto[REF_COUNT]:
             n_factor *= 2
             n += 1
-        if n_factor > 1 and random.randint(n_factor) != 0:
+        if n_factor > 1 and random.randint(0, n_factor) != 0:
             return False
     else:
-        create_neighbour_structures(myself, addr, None, source)
+        create_neighbour_structures(myself, addr[ADDR_ID], True, source)
         pto = nodeState[myself][NODE_NEIGHBOURHOOD][addr[ADDR_ID]]
         pto[TIME] = max(0, pto[TIME] - time_penalty)
         f_new = True
@@ -560,7 +574,6 @@ def add_new_addr(myself, source, addr, time_penalty):
     u_bucket = get_new_bucket(nodeState[myself][KEY], addr, source)
     u_bucket_pos = get_bucket_position(nodeState[myself][KEY], True, u_bucket, addr)
     vv_new = nodeState[myself][TRIED_NEW][NEW]
-    n_new = nodeState[myself][TRIED_NEW][N_NEW]
     if vv_new[u_bucket][u_bucket_pos] != addr[ADDR_ID]:
         insert = vv_new[u_bucket][u_bucket_pos] == -1
         if not insert:
@@ -572,35 +585,38 @@ def add_new_addr(myself, source, addr, time_penalty):
             clear_new(myself, u_bucket, u_bucket_pos)
             pto[REF_COUNT] += 1
             vv_new[u_bucket][u_bucket_pos] = addr[ADDR_ID]
-            n_new += 1
+            nodeState[myself][TRIED_NEW][N_NEW] += 1
         else:
             if pto[REF_COUNT] == 0:
-                raise ValueError("IMPLEMENT: I should delete the ID")
+                delete(myself, addr[ADDR_ID])
 
     return f_new
 
 
 def get_new_bucket(key, id, source):
-    group = get_group(get_IP(source))
-    to_hash = str(key) + get_group(get_IP(id)) + group
+    if isinstance(source, str):
+        group = get_group(source)
+    else:
+        group = get_group(get_IP(source))
+    to_hash = str(key) + get_group(get_IP(id[ADDR_ID])) + group
     hash1 = (hashlib.sha256(to_hash)).hexdigest()
-    to_hash = str(key) + group + str(hash1 % ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP)
+    to_hash = str(key) + group + str(int(hash1, 16) % ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP)
     hash2 = (hashlib.sha256(to_hash)).hexdigest()
-    return hash2 % ADDRMAN_NEW_BUCKET_COUNT
+    return int(hash2, 16) % ADDRMAN_NEW_BUCKET_COUNT
 
 
 def get_tried_bucket(key, id):
-    to_hash = str(key) + get_IP(id)
+    to_hash = str(key) + get_IP(id[ADDR_ID])
     hash1 = (hashlib.sha256(to_hash)).hexdigest()
-    to_hash = str(key) + get_group(get_IP(id)) + str(hash1 % ADDRMAN_TRIED_BUCKETS_PER_GROUP)
+    to_hash = str(key) + get_group(get_IP(id[ADDR_ID])) + str(int(hash1, 16) % ADDRMAN_TRIED_BUCKETS_PER_GROUP)
     hash2 = (hashlib.sha256(to_hash)).hexdigest()
-    return hash2 % ADDRMAN_TRIED_BUCKET_COUNT
+    return int(hash2, 16) % ADDRMAN_TRIED_BUCKET_COUNT
 
 
 def get_bucket_position(key, new, bucket, addr):
-    to_hash = str(key) + ('N' if new else 'K') + str(bucket) + addr[ADDR_ID]
+    to_hash = str(key) + ('N' if new else 'K') + str(bucket) + str(addr[ADDR_ID])
     hash1 = (hashlib.sha256(to_hash)).hexdigest()
-    return hash1 % ADDRMAN_BUCKET_SIZE
+    return int(hash1, 16) % ADDRMAN_BUCKET_SIZE
 
 
 def clear_new(myself, u_bucket, u_bucket_pos):
@@ -616,7 +632,7 @@ def clear_new(myself, u_bucket, u_bucket_pos):
 
 def dns_address_seed(myself):
     if len(nodeState[myself][RANDOM]) > 0:
-        if not nodeState[myself][CURRENT_CYCLE] % 11 == 0:
+        if not nodeState[myself][CURRENT_TIME] % 11 == 0:
             return
 
         relevant = 0
@@ -631,8 +647,9 @@ def dns_address_seed(myself):
     for dns in dns_seeds:
         for addr in dns:
             one_day = 3600 * 24
-            addr[ADDR_TIME] = nodeState[myself][CURRENT_CYCLE] - (3 * one_day) - random.randint(4 * one_day)
-            add_new_addr(myself, dns_seeds_ip[i], addr, 0)
+            addr_copy = list(addr)
+            addr_copy[ADDR_TIME] = nodeState[myself][CURRENT_TIME] - (3 * one_day) - random.randint(0, 4) * one_day
+            add_new_addr(myself, dns_seeds_ip[i], addr_copy, 0)
         i += 1
 
 # --------------------------------------
@@ -699,7 +716,7 @@ def misbehaving(myself, source, how_much):
 
 def is_terrible(myself, id):
     pto = nodeState[myself][NODE_NEIGHBOURHOOD][id]
-    now = nodeState[myself][CURRENT_CYCLE]
+    now = nodeState[myself][CURRENT_TIME]
     if pto[LAST_TRY] and pto[LAST_TRY] >= now - 60:
         return False
 
@@ -731,10 +748,10 @@ def send_ping(myself, target, pto):
     global ping_nonce
 
     ping_send = False
-    if pto[PING_STRC][PING_NONCE_SENT] == 0 and pto[PING_STRC][PING_TIME_START] + PING_INTERVAL < nodeState[myself][CURRENT_CYCLE]:
+    if pto[PING_STRC][PING_NONCE_SENT] == 0 and pto[PING_STRC][PING_TIME_START] + PING_INTERVAL < nodeState[myself][CURRENT_TIME]:
         ping_send = True
     if ping_send:
-        pto[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_CYCLE]
+        pto[PING_STRC][PING_TIME_START] = nodeState[myself][CURRENT_TIME]
         pto[PING_STRC][PING_NONCE_SENT] = ping_nonce
         ping_nonce += 1
         sim.send(PING, target, myself, pto[PING_STRC][PING_NONCE_SENT])
@@ -746,14 +763,14 @@ def send_reject_and_check_if_banned(myself, target, pto):
 
 
 def address_refresh_broadcast(myself, pto):
-    if pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
-        push_address(pto, [myself, get_IP(myself), nodeState[myself][CURRENT_CYCLE]])
-        pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL)
+    if pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] < nodeState[myself][CURRENT_TIME]:
+        push_address(pto, [myself, get_IP(myself), nodeState[myself][CURRENT_TIME]])
+        pto[ADDR_STRC][NEXT_LOCAL_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_TIME], AVG_LOCAL_ADDRESS_BROADCAST_INTERVAL)
 
 
 def send_addr(myself, target, pto):
-    if pto[ADDR_STRC][NEXT_ADDR_SEND] < nodeState[myself][CURRENT_CYCLE]:
-        pto[ADDR_STRC][NEXT_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_CYCLE], AVG_ADDRESS_BROADCAST_INTERVAL)
+    if pto[ADDR_STRC][NEXT_ADDR_SEND] < nodeState[myself][CURRENT_TIME]:
+        pto[ADDR_STRC][NEXT_ADDR_SEND] = poisson_next_send(nodeState[myself][CURRENT_TIME], AVG_ADDRESS_BROADCAST_INTERVAL)
         addr_to_send = []
         for addr in pto[ADDR_STRC][ADDR_TO_SEND]:
             if not has_addr(pto, addr):
@@ -815,18 +832,25 @@ def load_network(filename):
 
 def create_node():
     current_cycle = 0
-    key = random.randint()
+    current_time = base_time
+    key = random.getrandbits(256)
     msgs = [0] * 6
     neighbourhood_dic = defaultdict()
-    bucket = [-1] * 64
-    vv_tried = [bucket] * 256
-    vv_new = [bucket] * 1024
+
+    vv_new = []
+    for i in range(0, 1024):
+        vv_new.append([-1] * 64)
+
+    vv_tried = []
+    for i in range(0, 256):
+        vv_tried.append([-1] * 64)
+
     tried_new = [0, vv_tried, 0, vv_new]
     nodes_to_relay = defaultdict()
     tried_collisions = []
     neighbourhood = []
     random_vec = []
-    return [current_cycle, key, random_vec, neighbourhood_dic, neighbourhood, tried_new, nodes_to_relay, tried_collisions, msgs]
+    return [current_cycle, current_time, key, random_vec, neighbourhood_dic, neighbourhood, tried_new, nodes_to_relay, tried_collisions, msgs]
 
 
 def create_neighbour(inbound, source):
@@ -876,7 +900,7 @@ def create_ips():
 
     for i in range(0, nb_nodes):
         addr_str = gen_ip()
-        while addr_str not in ip:
+        while addr_str in ip:
             addr_str = gen_ip()
         ip.append(addr_str)
 
@@ -894,18 +918,18 @@ def create_DNS():
         list_of_nodes = random.sample(xrange(nb_nodes), 256)
         to_append = []
         for node in list_of_nodes:
-            time = random.randint(43200, 432000)
+            time = random.randint(691200, 1382400)
             to_append.append([node, time])
         dns_seeds.append(to_append)
 
         addr_str = gen_ip()
-        while addr_str not in ip:
+        while addr_str in ip:
             addr_str = gen_ip()
         dns_seeds_ip.append(addr_str)
 
 
 def configure(config):
-    global nb_nodes, nb_cycles, nodeState, node_cycle, expert_log, bad_nodes, number_of_bad_nodes, ping_nonce, ip, dns_seeds, dns_seeds_ip
+    global nb_nodes, nb_cycles, nodeState, node_cycle, expert_log, bad_nodes, number_of_bad_nodes, ping_nonce, ip, dns_seeds, dns_seeds_ip, base_time
 
     node_cycle = int(config['NODE_CYCLE'])
 
@@ -925,6 +949,7 @@ def configure(config):
     ip = []
     dns_seeds = []
     dns_seeds_ip = []
+    base_time = config['BASE_TIME']
 
     create_ips()
     create_DNS()
