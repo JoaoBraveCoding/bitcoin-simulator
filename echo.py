@@ -34,8 +34,8 @@ HEADER_ID, HEADER_PARENT_ID = 0, 1
 # Node structure
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, NODE_BLOCKS_ALREADY_REQUESTED, \
 NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, NODE_NEIGHBOURHOOD_STATS, MSGS, \
-NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODES_SIZE, MY_UNCONFIRMED_TX \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODES_SIZE, MY_UNCONFIRMED_TX, MY_CONFIRMED_TX, HAD_TO_INC, TIME_SINCE_LAST_DEC, DEPTH \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
@@ -67,15 +67,25 @@ INV_BLOCK_ID, INV_BLOCK_TTL = 0, 1
 
 TIME, INBOUND = 0, 1
 
-TIME_COMMITED, COMMITED = 0, 1
+TIME_COMMITTED, COMMITTED = 0, 1
 
 TS_RECEIVED, TTL = 0, 1
 
-TX_T_CYCLE_RECEIVED, TX_T_CYCLE_COMMITED = 0, 1
+TX_T_CYCLE_RECEIVED, TX_T_CYCLE_COMMITTED = 0, 1
 
 NOT_SAMPLED, TIMER_T, TIMER_T_1 = 0, 1, 2
 
 TOTAL_TIME, TOTAL_SENT = 0, 1
+
+CONF_TIME_COMMITTED, CONF_TIME_IT_TOOK = 0, 1
+
+HTI_BOOL, HTI_TIME = 0, 1
+
+HTI_RESET_TIME = 4 * 3600
+
+TIME_TO_REM_TX_FROM_CONFIRMED = 2 * 3600
+
+TIME_TO_WAIT_BEFORE_DEC = 2 * 3600
 
 # Time frame between t and t_1
 TIME_FRAME = 14400
@@ -114,7 +124,7 @@ def improve_performance(cycle):
         return
 
     for i in xrange(len(blocks_created)):
-        if blocks_created[i][BLOCK_HEIGHT] + 2 < highest_block and not isinstance(blocks_created[i][BLOCK_TX], int):
+        if blocks_created[i][BLOCK_HEIGHT] + 50 < highest_block and not isinstance(blocks_created[i][BLOCK_TX], int):
             for tx in blocks_created[i][BLOCK_TX]:
                 for myself in xrange(nb_nodes):
                     if tx in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
@@ -157,8 +167,12 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    #if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
-    #    increase_relay(myself)
+    if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
+        increase_relay(myself)
+
+    if hop_based_broadcast and nodeState[myself][CURRENT_CYCLE] > 1800:
+        size = len(nodeState[myself][NODE_NEIGHBOURHOOD]) // 2
+        nodeState[myself][NODES_SIZE] = [size, size]
 
     # show progress for one node
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
@@ -640,9 +654,9 @@ def get_classification(myself, source, current_cycle):
     timer_n = 0
     for tx in nodeState[myself][NODE_TX_TIMER][source][TIMER_T]:
         tx_struct = nodeState[myself][NODE_TX_TIMER][source][TIMER_T][tx]
-        if tx_struct[TX_T_CYCLE_COMMITED] is not None:
+        if tx_struct[TX_T_CYCLE_COMMITTED] is not None:
             timer_n += 1
-            timer_k += tx_struct[TX_T_CYCLE_COMMITED] - tx_struct[TX_T_CYCLE_RECEIVED]
+            timer_k += tx_struct[TX_T_CYCLE_COMMITTED] - tx_struct[TX_T_CYCLE_RECEIVED]
     for stat in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T][TOTAL_TLL]:
         t_k += stat[0]
     if t_n == 0:
@@ -722,10 +736,10 @@ def update_timer_lists(myself, target, current_cycle):
     list_to_iter = dict(nodeState[myself][NODE_TX_TIMER][target][TIMER_T])
     for id in list_to_iter:
         if list_to_iter[id][TX_T_CYCLE_RECEIVED] + TIME_FRAME < current_cycle:
-            if list_to_iter[id][TX_T_CYCLE_COMMITED] is None:
+            if list_to_iter[id][TX_T_CYCLE_COMMITTED] is None:
                 total_time = current_cycle - list_to_iter[id][TX_T_CYCLE_RECEIVED]
             else:
-                total_time = list_to_iter[id][TX_T_CYCLE_COMMITED] - list_to_iter[id][TX_T_CYCLE_RECEIVED]
+                total_time = list_to_iter[id][TX_T_CYCLE_COMMITTED] - list_to_iter[id][TX_T_CYCLE_RECEIVED]
             nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_TIME] += total_time
             nodeState[myself][NODE_TX_TIMER][target][TIMER_T_1][TOTAL_SENT] += 1
             del nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id]
@@ -736,36 +750,65 @@ def update_timer_lists(myself, target, current_cycle):
 def mark_tx_as_received(myself, id):
     for target in nodeState[myself][NODE_TX_TIMER]:
         if id in nodeState[myself][NODE_TX_TIMER][target][TIMER_T]:
-            nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id][TX_T_CYCLE_COMMITED] = nodeState[myself][CURRENT_CYCLE]
+            nodeState[myself][NODE_TX_TIMER][target][TIMER_T][id][TX_T_CYCLE_COMMITTED] = nodeState[myself][CURRENT_CYCLE]
+
+
+def find_block(tx):
+    for block in reversed(blocks_created):
+        if tx in block[BLOCK_TX]:
+            return block[BLOCK_ID]
+    return None
 
 
 def increase_relay(myself):
-    increased = False
-    to_remove = []
+    increase = False
+    now = nodeState[myself][CURRENT_CYCLE]
+
+    if nodeState[myself][HAD_TO_INC][HTI_TIME] + HTI_RESET_TIME < now:
+        nodeState[myself][HAD_TO_INC][HTI_BOOL] = False
+
+    to_rem = []
+    for tx in nodeState[myself][MY_CONFIRMED_TX]:
+        timeout = nodeState[myself][MY_CONFIRMED_TX][tx][CONF_TIME_COMMITTED] + TIME_TO_REM_TX_FROM_CONFIRMED <= now
+        if timeout:
+            to_rem.append(tx)
+
+    for tx in to_rem:
+        del nodeState[myself][MY_CONFIRMED_TX][tx]
 
     for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
-        if increased and nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION < nodeState[myself][CURRENT_CYCLE]:
-            push_to_send(myself, MINE, tx)
-            continue
+        if tx_commit[tx][COMMITTED]:
+            block = find_block(tx)
+            if block is None:
+                raise ValueError("Tx is presented as committed but it's not in any block")
 
-        if increased or not hop_based_broadcast:
-            break
+            in_inv = have_it(myself, BLOCK_TYPE, block)
+            if not in_inv:
+                raise ValueError("Tx is committed and we have the block but tx was not removed")
 
-        if nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION < nodeState[myself][CURRENT_CYCLE]:
-            if tx_commit[tx][COMMITED]:
-                to_remove.append(tx)
-                continue
-            if not increased and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
+    if now > INTERVAL:
+        for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
+            timeout = nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION <= now
+            if not increase and timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
                 nodeState[myself][NODES_SIZE][TOP] += 1
                 nodeState[myself][NODES_SIZE][RAND] += 1
-                increased = True
+                increase = True
+                nodeState[myself][HAD_TO_INC][HTI_BOOL] = True
                 up_top(myself)
 
-            push_to_send(myself, MINE, tx)
+            if timeout:
+                push_to_send(myself, MINE, tx)
 
-    for tx in to_remove:
-        del nodeState[myself][MY_UNCONFIRMED_TX][tx]
-
+        if not increase and not nodeState[myself][HAD_TO_INC][HTI_BOOL] and nodeState[myself][TIME_SINCE_LAST_DEC] + TIME_TO_WAIT_BEFORE_DEC <= now:
+            for tx in nodeState[myself][MY_CONFIRMED_TX]:
+                timeout = nodeState[myself][MY_CONFIRMED_TX][tx][CONF_TIME_IT_TOOK] > TIME_FOR_TX_CONFIRMATION
+                if timeout:
+                    return
+            if nodeState[myself][NODES_SIZE][TOP] - 1 > 0:
+                nodeState[myself][NODES_SIZE][TOP] -= 1
+                nodeState[myself][NODES_SIZE][RAND] -= 1
+                up_top(myself)
+                nodeState[myself][TIME_SINCE_LAST_DEC] = now
 # --------------------------------------
 
 
@@ -857,7 +900,7 @@ def generate_new_tx(myself):
         tx_created.append([0, 0])
     tx_commit.append([nodeState[myself][CURRENT_CYCLE], False])
     tx_created_after_last_block.append(new_tx)
-    #nodeState[myself][MY_UNCONFIRMED_TX][new_tx] = nodeState[myself][CURRENT_CYCLE]
+    nodeState[myself][MY_UNCONFIRMED_TX][new_tx] = nodeState[myself][CURRENT_CYCLE]
     tx_id += 1
 
 
@@ -883,10 +926,10 @@ def get_tx_to_block(myself):
         if size + 700 <= max_block_size:
             size += 700
             tx_array.append(tx)
-            if not tx_commit[tx][COMMITED]:
-                created = tx_commit[tx][TIME_COMMITED]
-                tx_commit[tx][TIME_COMMITED] = nodeState[myself][CURRENT_CYCLE] - created
-                tx_commit[tx][COMMITED] = True
+            if not tx_commit[tx][COMMITTED]:
+                created = tx_commit[tx][TIME_COMMITTED]
+                tx_commit[tx][TIME_COMMITTED] = nodeState[myself][CURRENT_CYCLE] - created
+                tx_commit[tx][COMMITTED] = True
             del nodeState[myself][NODE_MEMPOOL][tx]
             for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
                 if tx in nodeState[myself][NODE_NEIGHBOURHOOD_INV][neighbour][NEIGHBOURHOOD_TX_TO_SEND]:
@@ -1022,6 +1065,8 @@ def update_tx(myself, block):
             del nodeState[myself][NODE_MEMPOOL][tx]
 
         if tx in nodeState[myself][MY_UNCONFIRMED_TX]:
+            now = nodeState[myself][CURRENT_CYCLE]
+            nodeState[myself][MY_CONFIRMED_TX][tx] = [now, now - nodeState[myself][MY_UNCONFIRMED_TX][tx]]
             del nodeState[myself][MY_UNCONFIRMED_TX][tx]
 
         for neighbour in nodeState[myself][NODE_NEIGHBOURHOOD]:
@@ -1118,14 +1163,18 @@ def createNode(neighbourhood):
         timer[neighbour] = [0, defaultdict(), [0, 0]]
     node_neighbourhood_stats = [topx, stats]
     node_top_nodes_size = [top_nodes_size, random_nodes_size]
-    my_unconfirmed_tx = {}
+    my_unconfirmed_tx = defaultdict()
+    my_confirmed_tx = defaultdict()
+    has_to_inc = [False, 0]
+    time_since_last_dec = 0
+    depth = 0
 
     msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
 
     return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
             node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send, timer,
-            node_top_nodes_size, my_unconfirmed_tx]
+            node_top_nodes_size, my_unconfirmed_tx, my_confirmed_tx, has_to_inc, time_since_last_dec, depth]
 
 
 def create_nodes_and_miners(neighbourhood_size):
@@ -1319,6 +1368,7 @@ def get_miner_hops():
     counter = [0] * (further + 1)
     for node in seen.keys():
         counter[seen[node]] += 1
+        nodeState[node][DEPTH] = seen[node]
 
     return counter
 
@@ -1373,7 +1423,7 @@ def get_avg_total_sent_msg():
 def get_nb_tx_added_to_blocks():
     counter = 0
     for tx in tx_commit:
-        if tx[COMMITED]:
+        if tx[COMMITTED]:
             counter += 1
     return counter
 
@@ -1382,20 +1432,68 @@ def get_nb_of_tx_gened():
     tx_in_miners = []
     for myself in miners:
         for tx in nodeState[myself][NODE_MEMPOOL]:
-            if tx not in tx_created_after_last_block and not tx_commit[tx][COMMITED] and tx not in tx_in_miners:
+            if tx not in tx_created_after_last_block and not tx_commit[tx][COMMITTED] and tx not in tx_in_miners:
                 tx_in_miners.append(tx)
 
     return tx_id - len(tx_created_after_last_block) - len(tx_in_miners)
 
 
-def get_avg_time_commited():
+def get_avg_time_committed():
     counter = 0
     sum = 0
     for tx in tx_commit:
-        if tx[COMMITED]:
-            sum += tx[TIME_COMMITED]
+        if tx[COMMITTED]:
+            sum += tx[TIME_COMMITTED]
             counter += 1
     return sum / counter
+
+
+def get_nodes_per_conf():
+    if not hop_based_broadcast:
+        return None
+
+    results = defaultdict()
+    for myself in nodeState:
+        conf = "TOP-" + str(nodeState[myself][NODES_SIZE][TOP])
+        if conf in results:
+            results[conf] += 1
+        else:
+            results[conf] = 1
+
+    to_return = []
+    for key in results.keys():
+        to_return.append([key, results[key]])
+
+    return sorted(to_return)
+
+
+def get_conf_per_dist(counter):
+    if not hop_based_broadcast:
+        return None
+
+    resutls = defaultdict()
+    for depth in range(0, len(counter)):
+        for node in nodeState:
+            if nodeState[node][DEPTH] == depth:
+                config = "TOP-" + str(nodeState[node][NODES_SIZE][TOP])
+                if depth in resutls:
+                    if config in resutls[depth]:
+                        resutls[depth][config] += 1
+                    else:
+                        resutls[depth][config] = 1
+
+                else:
+                    resutls[depth] = defaultdict()
+                    resutls[depth][config] = 1
+
+    to_return = []
+    for depth in sorted(resutls):
+        tmp = []
+        for config in sorted(resutls[depth]):
+            tmp.append([config, resutls[depth][config]])
+        to_return.append(tmp)
+
+    return to_return
 
 
 def wrapup():
@@ -1470,12 +1568,16 @@ def wrapup():
 
     nb_tx_added_to_blocks = get_nb_tx_added_to_blocks()
     nb_of_tx_gened = get_nb_of_tx_gened()
-    avg_time_commited = get_avg_time_commited()
+    avg_time_commited = get_avg_time_committed()
+
+    nodes_per_conf = get_nodes_per_conf()
+
+    confs_per_depth = get_conf_per_dist(hops_distribution)
 
     data = []
     for tx in tx_commit:
-        if tx[COMMITED]:
-            data.append(tx[TIME_COMMITED])
+        if tx[COMMITTED]:
+            data.append(tx[TIME_COMMITTED])
 
     time_commited_CDF = utils.percentiles(data, percs=range(101), paired=False)
 
@@ -1484,56 +1586,35 @@ def wrapup():
     first_time = not os.path.isfile('out/{}.csv'.format(results_name))
     if first_time:
         csv_file_to_write = open('out/results.csv', 'w')
-        backup = open('backup.txt', 'w')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
         spam_writer.writerow(["Number of nodes", "Number of cycles", "Number of miners", "Extra miners"])
         spam_writer.writerow([nb_nodes, nb_cycles, number_of_miners, extra_replicas])
-        spam_writer.writerow(["Top nodes size", "Random nodes size", "Early push", "Bad nodes", "Timer solution",
-                              "Avg inv", "Avg entries per inv",
-                              "Avg getData", "Avg entries per getData", "Avg Tx", "Avg getBlockTX",
-                              "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv", "Avg total sent messages",
-                              "Total tx created", "Total tx added to blocks", "Avg commit time", "Total number of branches",
-                              "Total blocks created", "Hops distribution"])
+        spam_writer.writerow(["Bitcoin", "Early push", "Bad nodes", "Avg inv", "Avg entries per inv", "Avg getData", "Avg entries per getData",
+                              "Avg Tx", "Avg getBlockTX", "Avg missing tx", "Avg numb of tx per block", "% of duplicates inv",
+                              "Avg total sent messages", "Total tx created", "Total tx added to blocks", "Avg commit time",
+                              "Total number of branches", "Total blocks created", "Hops distribution"])
     else:
         csv_file_to_write = open('out/results.csv', 'a')
-        backup = open('backup.txt', 'a')
         spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
 
-    if not hop_based_broadcast:
-        spam_writer.writerow(["False", "False", early_push, number_of_bad_nodes, timer_solution, sum_inv / nb_nodes,
-                              avg_entries_per_inv, sum_getData / nb_nodes,
-                              avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
-                              sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
-                              avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited, nb_forks, block_id,
-                              ''.join(str(e) + " " for e in hops_distribution)])
-        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
-                     .format("False", "False", early_push, number_of_bad_nodes, timer_solution, sum_inv / nb_nodes,
-                             avg_entries_per_inv, sum_getData / nb_nodes,
-                             avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes,
-                             sum_missingTX / nb_nodes, avg_tx_per_block, avg_duplicated_inv,
-                             avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited, nb_forks, block_id,
-                             ''.join(str(e) + " " for e in hops_distribution)))
-    else:
-        spam_writer.writerow([top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, timer_solution,
-                              sum_inv / nb_nodes, avg_entries_per_inv,
-                              sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
-                              sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
-                              avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
-                              nb_forks, block_id,
-                              ''.join(str(e) + " " for e in hops_distribution)])
-        backup.write("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}"
-                     .format(top_nodes_size, random_nodes_size, early_push, number_of_bad_nodes, timer_solution,
-                             sum_inv / nb_nodes, avg_entries_per_inv,
-                             sum_getData / nb_nodes, avg_entries_per_getdata, sum_tx / nb_nodes,
-                             sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
-                             avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited,
-                             nb_forks, block_id,
-                             ''.join(str(e) + " " for e in hops_distribution)))
-    backup.close()
+    spam_writer.writerow([not hop_based_broadcast, early_push, number_of_bad_nodes, sum_inv / nb_nodes, avg_entries_per_inv, sum_getData / nb_nodes,
+                          avg_entries_per_getdata, sum_tx / nb_nodes, sum_getBlockTX / nb_nodes, sum_missingTX / nb_nodes, avg_tx_per_block,
+                          avg_duplicated_inv, avg_total_sent_msg, nb_of_tx_gened, nb_tx_added_to_blocks, avg_time_commited, nb_forks, block_id,
+                          ''.join(str(e) + " " for e in hops_distribution)])
     csv_file_to_write.flush()
     csv_file_to_write.close()
-    print(tx_id)
 
+    if hop_based_broadcast:
+        csv_file_to_write = open('out/{}.csv'.format("new-stats-" + str(runId)), 'w')
+        spam_writer = csv.writer(csv_file_to_write, delimiter=',', quotechar='\'', quoting=csv.QUOTE_MINIMAL)
+        for conf in nodes_per_conf:
+            spam_writer.writerow([conf[0], conf[1]])
+        for depth in range(0, len(confs_per_depth)):
+            spam_writer.writerow([depth])
+            for conf in confs_per_depth[depth]:
+                spam_writer.writerow([conf[0], conf[1]])
+        csv_file_to_write.flush()
+        csv_file_to_write.close()
 
 # --------------------------------------
 

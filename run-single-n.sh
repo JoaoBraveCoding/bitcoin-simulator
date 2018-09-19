@@ -9,6 +9,9 @@ rn=0
 pids=()
 current_ep=False
 badNodes=0
+#pypy=/usr/bin/pypy
+#pypy=/home/ubuntu/pypy/bin/pypy
+pypy=/usr/local/Cellar/pypy/6.0.0/bin/pypy
 
 
 if [ -z "$1" ]
@@ -41,27 +44,30 @@ filename=$3
 tn=$4
 rn=$5
 
+((cycles=cycles+1))
 
+$pypy echo.py conf_echo/ $runId -sn True
 while [ "$i" -le "$cycles" ]
 do
 
-    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes -bh $behaviour
+    echo run: $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bm $badNodes
+
     if [ "$numberPararelism" -eq "-1" ]
     then
       if [ "$runId" -eq "1" ]
       then
-        pypy echo.py conf_echo/ $runId -sn True
+        $pypy echo.py conf_echo/ $runId -sn True
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodes
+        $pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodes
       fi
     else
       if [ "$runId" -eq "1" ]
       then
-        pypy echo.py conf_echo/ $runId -sn True &
+        $pypy echo.py conf_echo/ $runId -sn True &
         pids[$runId]=$!
         sleep 10 
       else
-        pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodes & 
+        $pypy echo.py conf_echo/ $runId -ln $filename -tn $tn -rn $rn -ep $current_ep -bn $badNodes & 
         pids[$runId]=$!
       fi
       ((numberPararelism=numberPararelism-1))
