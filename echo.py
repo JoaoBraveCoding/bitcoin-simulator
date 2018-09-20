@@ -34,8 +34,8 @@ HEADER_ID, HEADER_PARENT_ID = 0, 1
 # Node structure
 CURRENT_CYCLE, NODE_CURRENT_BLOCK, NODE_INV, NODE_PARTIAL_BLOCKS, NODE_MEMPOOL, NODE_BLOCKS_ALREADY_REQUESTED, \
 NODE_TX_ALREADY_REQUESTED, NODE_TIME_TO_GEN, NODE_NEIGHBOURHOOD, NODE_NEIGHBOURHOOD_INV, NODE_NEIGHBOURHOOD_STATS, MSGS, \
-NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODES_SIZE, MY_UNCONFIRMED_TX, MY_CONFIRMED_TX, HAD_TO_INC, TIME_SINCE_LAST_DEC, DEPTH \
-    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
+NODE_HEADERS_TO_REQUEST, NODE_TIME_TO_SEND, NODE_TX_TIMER, NODES_SIZE, MY_UNCONFIRMED_TX, MY_CONFIRMED_TX, HAD_TO_INC, TIME_SINCE_LAST_DEC, TIME_SINCE_LAST_INC, DEPTH \
+    = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21
 
 NODE_INV_RECEIVED_BLOCKS, NODE_INV_RECEIVED_TX = 0, 1
 
@@ -81,11 +81,11 @@ CONF_TIME_COMMITTED, CONF_TIME_IT_TOOK = 0, 1
 
 HTI_BOOL, HTI_TIME = 0, 1
 
-HTI_RESET_TIME = 2 * 3600
+TIME_TO_REM_TX_FROM_CONFIRMED = 2 * 60 * 60
 
-TIME_TO_REM_TX_FROM_CONFIRMED = 2 * 3600
+HTI_RESET_TIME = 4 * 60 * 60
 
-TIME_TO_WAIT_BEFORE_DEC = 1 * 3600
+TIME_TO_WAIT_BEFORE_DEC = 2 * 60 * 60
 
 # Time frame between t and t_1
 TIME_FRAME = 14400
@@ -170,7 +170,7 @@ def CYCLE(myself):
     if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
         increase_relay(myself)
 
-    if hop_based_broadcast and nodeState[myself][CURRENT_CYCLE] > 1800:
+    if hop_based_broadcast and nodeState[myself][CURRENT_CYCLE] == 1800:
         size = len(nodeState[myself][NODE_NEIGHBOURHOOD]) // 2
         nodeState[myself][NODES_SIZE] = [size, size]
 
@@ -180,7 +180,7 @@ def CYCLE(myself):
         value = datetime.datetime.fromtimestamp(time.time())
         #output.write('{} run: {} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
         #output.flush()
-        print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        print('{} run: {} cycle: {} mempool size: {} Top {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL]), nodeState[myself][NODES_SIZE][TOP]))
 
     # If a node can generate transactions
     i = 0
@@ -694,9 +694,8 @@ def update_top(myself, source):
 def up_top(myself):
     scores = []
     for id in nodeState[myself][NODE_NEIGHBOURHOOD]:
-        if id not in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
-            score = get_classification(myself, id, nodeState[myself][CURRENT_CYCLE])
-            scores.append([score, id])
+        score = get_classification(myself, id, nodeState[myself][CURRENT_CYCLE])
+        scores.append([score, id])
 
     scores.sort()
     nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] = []
@@ -756,6 +755,14 @@ def increase_relay(myself):
     for tx in to_rem:
         del nodeState[myself][MY_CONFIRMED_TX][tx]
 
+    to_rem = []
+    for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
+        if tx_commit[tx][COMMITTED] and nodeState[myself][MY_UNCONFIRMED_TX][tx] > TIME_FOR_TX_CONFIRMATION * 2:
+            to_rem.append(tx)
+
+    for tx in to_rem:
+        del nodeState[myself][MY_UNCONFIRMED_TX][tx]
+
     if now > INTERVAL:
         sum_of_all_times = 0
         for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
@@ -763,26 +770,30 @@ def increase_relay(myself):
 #            timeout = nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION <= now
 #            if timeout:
 #                push_to_send(myself, MINE, tx)
-        avg = sum_of_all_times / len(nodeState[myself][MY_UNCONFIRMED_TX])
-        timeout = avg + TIME_FOR_TX_CONFIRMATION <= now
-        if not increase and timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
-            nodeState[myself][NODES_SIZE][TOP] += 1
-            nodeState[myself][NODES_SIZE][RAND] += 1
-            increase = True
-            nodeState[myself][HAD_TO_INC][HTI_BOOL] = True
-            up_top(myself)
+        if sum_of_all_times > 0:
+            avg = sum_of_all_times / len(nodeState[myself][MY_UNCONFIRMED_TX])
+            timeout = avg + TIME_FOR_TX_CONFIRMATION <= now
+            if not increase and timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]) // 2 and \
+                    nodeState[myself][TIME_SINCE_LAST_INC] + TIME_TO_WAIT_BEFORE_DEC <= now:
+                nodeState[myself][NODES_SIZE][TOP] += 1
+                nodeState[myself][NODES_SIZE][RAND] += 1
+                increase = True
+                nodeState[myself][HAD_TO_INC][HTI_BOOL] = True
+                up_top(myself)
+                nodeState[myself][TIME_SINCE_LAST_INC] = now
 
         if not increase and not nodeState[myself][HAD_TO_INC][HTI_BOOL] and nodeState[myself][TIME_SINCE_LAST_DEC] + TIME_TO_WAIT_BEFORE_DEC <= now:
             sum_of_all_times = 0
             for tx in nodeState[myself][MY_CONFIRMED_TX]:
                 sum_of_all_times += nodeState[myself][MY_CONFIRMED_TX][tx][CONF_TIME_IT_TOOK]
-            avg = sum_of_all_times / len(nodeState[myself][MY_UNCONFIRMED_TX])
-            timeout = avg > TIME_FOR_TX_CONFIRMATION
-            if not timeout and nodeState[myself][NODES_SIZE][TOP] - 1 > 0:
-                nodeState[myself][NODES_SIZE][TOP] -= 1
-                nodeState[myself][NODES_SIZE][RAND] -= 1
-                up_top(myself)
-                nodeState[myself][TIME_SINCE_LAST_DEC] = now
+            if sum_of_all_times > 0:
+                avg = sum_of_all_times / len(nodeState[myself][MY_CONFIRMED_TX])
+                timeout = avg <= TIME_FOR_TX_CONFIRMATION
+                if timeout and nodeState[myself][NODES_SIZE][TOP] - 1 > 0:
+                    nodeState[myself][NODES_SIZE][TOP] -= 1
+                    nodeState[myself][NODES_SIZE][RAND] -= 1
+                    up_top(myself)
+                    nodeState[myself][TIME_SINCE_LAST_DEC] = now
 # --------------------------------------
 
 
@@ -1141,6 +1152,8 @@ def createNode(neighbourhood):
     my_confirmed_tx = defaultdict()
     has_to_inc = [False, 0]
     time_since_last_dec = 0
+    time_since_last_inc = 0
+
     depth = 0
 
     msgs = [[0, 0], 0, 0, [0, 0], 0, 0, 0, 0, 0, 0, [0, 0, 0]]
@@ -1148,7 +1161,7 @@ def createNode(neighbourhood):
     return [current_cycle, node_current_block, node_inv, node_partial_blocks, node_mempool,
             node_blocks_already_requested, node_tx_already_requested, node_time_to_gen, neighbourhood,
             node_neighbourhood_inv, node_neighbourhood_stats, msgs, node_headers_requested, time_to_send, timer,
-            node_top_nodes_size, my_unconfirmed_tx, my_confirmed_tx, has_to_inc, time_since_last_dec, depth]
+            node_top_nodes_size, my_unconfirmed_tx, my_confirmed_tx, has_to_inc, time_since_last_dec, time_since_last_inc, depth]
 
 
 def create_nodes_and_miners(neighbourhood_size):
