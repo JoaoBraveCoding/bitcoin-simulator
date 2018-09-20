@@ -81,11 +81,11 @@ CONF_TIME_COMMITTED, CONF_TIME_IT_TOOK = 0, 1
 
 HTI_BOOL, HTI_TIME = 0, 1
 
-HTI_RESET_TIME = 4 * 3600
+HTI_RESET_TIME = 2 * 3600
 
 TIME_TO_REM_TX_FROM_CONFIRMED = 2 * 3600
 
-TIME_TO_WAIT_BEFORE_DEC = 2 * 3600
+TIME_TO_WAIT_BEFORE_DEC = 1 * 3600
 
 # Time frame between t and t_1
 TIME_FRAME = 14400
@@ -102,10 +102,10 @@ BLOCK_WEIGHT = 100
 TX_TIME_WEIGHT = 0.2
 
 # Time it should take for a tx to be accepted
-TIME_FOR_TX_CONFIRMATION = 1800
+TIME_FOR_TX_CONFIRMATION = 30 * 60
 
 # Interval where the log is not recorded first x sec and last x sec
-INTERVAL = 18000
+INTERVAL = 5 * 3600
 
 
 def init():
@@ -124,7 +124,7 @@ def improve_performance(cycle):
         return
 
     for i in xrange(len(blocks_created)):
-        if blocks_created[i][BLOCK_HEIGHT] + 50 < highest_block and not isinstance(blocks_created[i][BLOCK_TX], int):
+        if blocks_created[i][BLOCK_HEIGHT] + 2 < highest_block and not isinstance(blocks_created[i][BLOCK_TX], int):
             for tx in blocks_created[i][BLOCK_TX]:
                 for myself in xrange(nb_nodes):
                     if tx in nodeState[myself][NODE_INV][NODE_INV_RECEIVED_TX]:
@@ -178,9 +178,9 @@ def CYCLE(myself):
     if myself == 0 and nodeState[myself][CURRENT_CYCLE] % 600 == 0:
         improve_performance(nodeState[myself][CURRENT_CYCLE])
         value = datetime.datetime.fromtimestamp(time.time())
-        output.write('{} run: {} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
-        output.flush()
-        #print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.write('{} run: {} cycle: {} mempool size: {}\n'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
+        #output.flush()
+        print('{} run: {} cycle: {} mempool size: {}'.format(value.strftime('%Y-%m-%d %H:%M:%S'), runId,  nodeState[myself][CURRENT_CYCLE], len(nodeState[myself][NODE_MEMPOOL])))
 
     # If a node can generate transactions
     i = 0
@@ -632,8 +632,7 @@ def update_neighbour_statistics(myself, source):
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_TLL] += stat[0]
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][STATS][source][STATS_T_1][TOTAL_MSG_RECEIVED] += 1
 
-    score = get_classification(myself, source, current_cycle)
-    update_top(myself, source, score)
+    update_top(myself, source)
 
 
 def get_classification(myself, source, current_cycle):
@@ -680,8 +679,7 @@ def get_classification(myself, source, current_cycle):
     return (1 - ALPHA) * t_1 + ALPHA * t
 
 
-def update_top(myself, source, score):
-    current_cycle = nodeState[myself][CURRENT_CYCLE]
+def update_top(myself, source):
     if source in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return
 
@@ -690,26 +688,10 @@ def update_top(myself, source, score):
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(source)
         return
 
-    worst_score = -1
-    worst_index = -1
-    for i in range(0, len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES])):
-        node = nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][i]
-        member_score = get_classification(myself, node, current_cycle)
-        if member_score < score:
-            continue
-        elif member_score >= score and worst_score < member_score:
-            worst_score = member_score
-            worst_index = i
-        else:
-            continue
-
-    if worst_index != -1:
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES][worst_index] = source
+    up_top(myself)
 
 
 def up_top(myself):
-    available_spots = nodeState[myself][NODES_SIZE][TOP] - len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES])
-
     scores = []
     for id in nodeState[myself][NODE_NEIGHBOURHOOD]:
         if id not in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
@@ -717,11 +699,9 @@ def up_top(myself):
             scores.append([score, id])
 
     scores.sort()
-    i = 0
-    while available_spots > 0:
+    nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] = []
+    for i in range(0, nodeState[myself][NODES_SIZE][TOP]):
         nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(scores[i][1])
-        i += 1
-        available_spots -= 1
 
 
 def set_timer(myself, target, id, current_cycle):
@@ -776,35 +756,29 @@ def increase_relay(myself):
     for tx in to_rem:
         del nodeState[myself][MY_CONFIRMED_TX][tx]
 
-    for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
-        if tx_commit[tx][COMMITTED]:
-            block = find_block(tx)
-            if block is None:
-                raise ValueError("Tx is presented as committed but it's not in any block")
-
-            in_inv = have_it(myself, BLOCK_TYPE, block)
-            if not in_inv:
-                raise ValueError("Tx is committed and we have the block but tx was not removed")
-
     if now > INTERVAL:
+        sum_of_all_times = 0
         for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
-            timeout = nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION <= now
-            if not increase and timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
-                nodeState[myself][NODES_SIZE][TOP] += 1
-                nodeState[myself][NODES_SIZE][RAND] += 1
-                increase = True
-                nodeState[myself][HAD_TO_INC][HTI_BOOL] = True
-                up_top(myself)
-
-            if timeout:
-                push_to_send(myself, MINE, tx)
+            sum_of_all_times += nodeState[myself][MY_UNCONFIRMED_TX][tx]
+#            timeout = nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION <= now
+#            if timeout:
+#                push_to_send(myself, MINE, tx)
+        avg = sum_of_all_times / len(nodeState[myself][MY_UNCONFIRMED_TX])
+        timeout = avg + TIME_FOR_TX_CONFIRMATION <= now
+        if not increase and timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]):
+            nodeState[myself][NODES_SIZE][TOP] += 1
+            nodeState[myself][NODES_SIZE][RAND] += 1
+            increase = True
+            nodeState[myself][HAD_TO_INC][HTI_BOOL] = True
+            up_top(myself)
 
         if not increase and not nodeState[myself][HAD_TO_INC][HTI_BOOL] and nodeState[myself][TIME_SINCE_LAST_DEC] + TIME_TO_WAIT_BEFORE_DEC <= now:
+            sum_of_all_times = 0
             for tx in nodeState[myself][MY_CONFIRMED_TX]:
-                timeout = nodeState[myself][MY_CONFIRMED_TX][tx][CONF_TIME_IT_TOOK] > TIME_FOR_TX_CONFIRMATION
-                if timeout:
-                    return
-            if nodeState[myself][NODES_SIZE][TOP] - 1 > 0:
+                sum_of_all_times += nodeState[myself][MY_CONFIRMED_TX][tx][CONF_TIME_IT_TOOK]
+            avg = sum_of_all_times / len(nodeState[myself][MY_UNCONFIRMED_TX])
+            timeout = avg > TIME_FOR_TX_CONFIRMATION
+            if not timeout and nodeState[myself][NODES_SIZE][TOP] - 1 > 0:
                 nodeState[myself][NODES_SIZE][TOP] -= 1
                 nodeState[myself][NODES_SIZE][RAND] -= 1
                 up_top(myself)

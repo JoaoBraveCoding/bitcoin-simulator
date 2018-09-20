@@ -85,6 +85,16 @@ def sendReliable(f, *p):
         print p[1]
         print p[0]
         print e
+        orig_stdout = sys.stdout
+        a = open('error.log', 'w')
+        sys.stdout = a
+
+        print p[1]
+        print p[0]
+        print e
+
+        sys.stdout = orig_stdout
+        a.close()
         sys.exit()
 
 
@@ -132,6 +142,20 @@ def run():
         # 	logger.info(" {} events queued \t {} events done\t timestamp: %d           ".format(len(queue),cnt,timestamp))
     except Exception as e:
         ex_type, ex, tb = sys.exc_info()
+
+        orig_stdout = sys.stdout
+        a = open('error.log', 'w')
+        sys.stdout = a
+
+        print "error:", e, " error-message:", ex_type, ex
+        stack = traceback.extract_tb(tb)
+        for str in stack:
+            print str
+        print 'Executed: %d events' % (cnt)
+
+        sys.stdout = orig_stdout
+        a.close()
+
         print "error:", e, " error-message:", ex_type, ex
         traceback.print_tb(tb)
         #print "queue", queue
@@ -144,7 +168,6 @@ send = sendReliable
 
 def init(nodeCycle, nodeDrift, latencyTable, latencyDrift=0):
     global NODE_CYCLE, NODE_DRIFT, LATENCY_TABLE, LATENCY_DRIFT, LATENCY_TABLE_LENGHT
-
     NODE_CYCLE = nodeCycle
     NODE_DRIFT = nodeDrift
 
