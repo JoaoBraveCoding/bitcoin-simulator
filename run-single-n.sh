@@ -9,8 +9,8 @@ rn=0
 pids=()
 current_ep=False
 badNodes=0
-pypy=/usr/bin/pypy
-#pypy=/home/ubuntu/pypy/bin/pypy
+#pypy=/usr/bin/pypy
+pypy=/home/ubuntu/pypy/bin/pypy
 #pypy=/usr/local/Cellar/pypy/6.0.0/bin/pypy
 
 

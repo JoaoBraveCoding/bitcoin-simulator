@@ -14,7 +14,7 @@ RANDOM_NODES_SIZE: 1
 TIMER_SOLUTION: True
 
 # Number of simulation cycles
-NUMBER_OF_CYCLES : 122400
+NUMBER_OF_CYCLES : 208800
 
 # Duration of node cycle
 NODE_CYCLE: 1250

@@ -81,7 +81,7 @@ CONF_TIME_COMMITTED, CONF_TIME_IT_TOOK = 0, 1
 
 HTI_BOOL, HTI_TIME = 0, 1
 
-TIME_TO_REM_TX_FROM_CONFIRMED = 2 * 60 * 60
+TIME_TO_REM_TX_FROM_CONFIRMED = 1 * 60 * 60
 
 HTI_RESET_TIME = 4 * 60 * 60
 
@@ -161,11 +161,21 @@ def get_headers_to_send(myself, target, new_block):
 
 
 def CYCLE(myself):
-    global nodeState, blocks_mined_by_randoms
+    global nodeState, blocks_mined_by_randoms, miners
 
     # with churn the node might be gone
     if myself not in nodeState:
         return
+
+    if myself == 0 and nodeState[myself][CURRENT_CYCLE] == 61200:
+        miners = random.sample(xrange(nb_nodes), 5)
+#        for i in range(0, 2):
+#            miners.pop()
+#        nodes_to_append = random.sample(xrange(nb_nodes), 2)
+#        while nodes_to_append in miners:
+#            nodes_to_append = random.sample(xrange(nb_nodes), 2)
+#        for node in nodes_to_append:
+#           miners.append(node)
 
     if nodeState[myself][CURRENT_CYCLE] % 600 == 0 and hop_based_broadcast:
         increase_relay(myself)
@@ -573,7 +583,6 @@ def get_block_header(block):
 
 def process_block(myself, source, block):
     global nodeState
-
     # Check if it's a new block
     if not have_it(myself, BLOCK_TYPE, block[BLOCK_ID]):
         update_have_it(myself, BLOCK_TYPE, block[BLOCK_ID])
@@ -683,11 +692,6 @@ def update_top(myself, source):
     if source in nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]:
         return
 
-    if not nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES] or \
-            len(nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES]) < nodeState[myself][NODES_SIZE][TOP]:
-        nodeState[myself][NODE_NEIGHBOURHOOD_STATS][TOP_N_NODES].append(source)
-        return
-
     up_top(myself)
 
 
@@ -740,7 +744,6 @@ def find_block(tx):
 
 
 def increase_relay(myself):
-    increase = False
     now = nodeState[myself][CURRENT_CYCLE]
 
     if nodeState[myself][HAD_TO_INC][HTI_TIME] + HTI_RESET_TIME < now:
@@ -763,26 +766,27 @@ def increase_relay(myself):
     for tx in to_rem:
         del nodeState[myself][MY_UNCONFIRMED_TX][tx]
 
+    to_resend = []
     if now > INTERVAL:
         sum_of_all_times = 0
         for tx in nodeState[myself][MY_UNCONFIRMED_TX]:
-            sum_of_all_times += nodeState[myself][MY_UNCONFIRMED_TX][tx]
-#            timeout = nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION <= now
-#            if timeout:
-#                push_to_send(myself, MINE, tx)
+            timeout = nodeState[myself][MY_UNCONFIRMED_TX][tx] + TIME_FOR_TX_CONFIRMATION <= now
+            if timeout and not tx_commit[tx][COMMITTED]:
+                to_resend.append(tx)
+            sum_of_all_times += now - nodeState[myself][MY_UNCONFIRMED_TX][tx]
+
         if sum_of_all_times > 0:
             avg = sum_of_all_times / len(nodeState[myself][MY_UNCONFIRMED_TX])
-            timeout = avg + TIME_FOR_TX_CONFIRMATION <= now
-            if not increase and timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]) // 2 and \
+            timeout = avg > TIME_FOR_TX_CONFIRMATION
+            if timeout and nodeState[myself][NODES_SIZE][TOP] + 1 <= len(nodeState[myself][NODE_NEIGHBOURHOOD]) // 2 and \
                     nodeState[myself][TIME_SINCE_LAST_INC] + TIME_TO_WAIT_BEFORE_DEC <= now:
                 nodeState[myself][NODES_SIZE][TOP] += 1
                 nodeState[myself][NODES_SIZE][RAND] += 1
-                increase = True
                 nodeState[myself][HAD_TO_INC][HTI_BOOL] = True
                 up_top(myself)
                 nodeState[myself][TIME_SINCE_LAST_INC] = now
 
-        if not increase and not nodeState[myself][HAD_TO_INC][HTI_BOOL] and nodeState[myself][TIME_SINCE_LAST_DEC] + TIME_TO_WAIT_BEFORE_DEC <= now:
+        if not nodeState[myself][HAD_TO_INC][HTI_BOOL] and nodeState[myself][TIME_SINCE_LAST_DEC] + TIME_TO_WAIT_BEFORE_DEC <= now:
             sum_of_all_times = 0
             for tx in nodeState[myself][MY_CONFIRMED_TX]:
                 sum_of_all_times += nodeState[myself][MY_CONFIRMED_TX][tx][CONF_TIME_IT_TOOK]
@@ -794,6 +798,9 @@ def increase_relay(myself):
                     nodeState[myself][NODES_SIZE][RAND] -= 1
                     up_top(myself)
                     nodeState[myself][TIME_SINCE_LAST_DEC] = now
+
+        for tx in to_resend:
+            push_to_send(myself, tx, MINE)
 # --------------------------------------
 
 
@@ -883,7 +890,11 @@ def generate_new_tx(myself):
 
     if tx_array:
         tx_created.append([0, 0])
-    tx_commit.append([nodeState[myself][CURRENT_CYCLE], False])
+    if nodeState[myself][CURRENT_CYCLE] >= INTERVAL:
+        to_append = [nodeState[myself][CURRENT_CYCLE], False, (nodeState[myself][CURRENT_CYCLE]-INTERVAL) // 3600]
+    else:
+        to_append = [nodeState[myself][CURRENT_CYCLE], False, -1]
+    tx_commit.append(to_append)
     tx_created_after_last_block.append(new_tx)
     nodeState[myself][MY_UNCONFIRMED_TX][new_tx] = nodeState[myself][CURRENT_CYCLE]
     tx_id += 1
@@ -1483,6 +1494,26 @@ def get_conf_per_dist(counter):
     return to_return
 
 
+def commits_per_time():
+    dic = defaultdict()
+    for tx in tx_commit:
+        if tx[COMMITTED] and tx[2] > 0:
+            if tx[2] in dic:
+                dic[tx[2]][0] += tx[TIME_COMMITTED]
+                dic[tx[2]][1] += 1
+            else:
+                dic[tx[2]] = [tx[TIME_COMMITTED], 1]
+
+    to_return = []
+    for i in range(0, max(dic.keys())):
+        if i in dic.keys():
+            to_return.append(dic[i][0]/dic[i][1])
+        else:
+            to_return.append(0)
+
+    return to_return
+
+
 def wrapup():
     global nodeState
 
@@ -1561,6 +1592,8 @@ def wrapup():
 
     confs_per_depth = get_conf_per_dist(hops_distribution)
 
+    commits_per_min = commits_per_time()
+
     data = []
     for tx in tx_commit:
         if tx[COMMITTED]:
@@ -1590,6 +1623,7 @@ def wrapup():
                           ''.join(str(e) + " " for e in hops_distribution)])
     csv_file_to_write.flush()
     csv_file_to_write.close()
+    utils.dump_as_gnu_plot([commits_per_min], 'out/commits_per_time-' + str(runId) + '.gpData', ['time_commited'])
 
     if hop_based_broadcast:
         csv_file_to_write = open('out/{}.csv'.format("new-stats-" + str(runId)), 'w')
