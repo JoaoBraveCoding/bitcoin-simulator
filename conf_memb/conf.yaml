@@ -6,6 +6,9 @@ MAX_OUTBOUND_NODES: 8
 BASE_TIME: 777600
 NUMBER_OF_CYCLES : 18000
 
+# Bad miners
+NUMBER_OF_BAD_NODES: 0
+
 # Duration of node cycle
 NODE_CYCLE: 125
 
