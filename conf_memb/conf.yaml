@@ -1,35 +1,16 @@
 # Network type
-NUMBER_OF_NODES : 625
-NUMBER_OF_MINERS: 5
-EXTRA_REPLICAS: 0
-NEIGHBOURHOOD_SIZE: 8
-
-# Bad miners
-NUMBER_OF_BAD_NODES: 0
-
-# Hop configurations
-HOP_BASED_BROADCAST: True
-TOP_NODES_SIZE: 1
-RANDOM_NODES_SIZE: 1
-TIMER_SOLUTION: True
+NUMBER_OF_NODES : 500
+MAX_OUTBOUND_NODES: 8
 
 # Number of simulation cycles
-NUMBER_OF_CYCLES : 208800
+BASE_TIME: 777600
+NUMBER_OF_CYCLES : 18000
 
 # Duration of node cycle
-NODE_CYCLE: 1250
+NODE_CYCLE: 125
 
 # Log configurations
-EXPERT_LOG: True
-
-# Transactions configurations
-NUMB_TX_PER_CYCLE: 2
-MIN_TX_SIZE: 401
-MAX_TX_SIZE: 1498
-TX_ARRAY: False
-
-# Block specifications
-MAX_BLOCK_SIZE: 1000000
+EXPERT_LOG: False
 
 # system settings, optional
 # whether to consider churn or not

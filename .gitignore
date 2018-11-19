@@ -112,6 +112,10 @@ conf_echo/*.gpData
 networks/
 output.txt
 run-test.sh
+<<<<<<< HEAD
+=======
+backup.txt
+>>>>>>> neighbourhood-diss
 
 #Mac
 *.DS_Store
