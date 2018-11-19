@@ -6,6 +6,7 @@ This simulator is able to simulate two distinct behaviours of Bitcoin, the relay
 
 All configurations are specified in the respectives conf.yaml, files regarding relay of information can be found in the conf_diss folder and files regarding membership protocol in the conf_memb folder.
 
+Note that some configurations are related with my masters thesis, you can read more about them in https://github.com/JoaoBraveCoding/thesis
 
 ## Running
 
@@ -33,6 +34,22 @@ How to run:
   utils.py provides some common statistical functions and other utils such as dumping to GnuPlot format.
 - The diss.py file already provides some stats that used during my masters
 
+## Advanced running
+
+Optional configuration variables:
+- -cn bool - Create new network
+- -sn bool - Save network
+- -ln bool file-name - Load network
+- -rsn string - Results name
+- -bn int - Percentage of bad nodes
+- -tn int - Top nodes size
+- -rn int - Random nodes size
+- -ep bool - Early push on or off
+- -ts bool - Timer solution on or off
+
+```
+ $ pypy diss.py conf_diss/ 1 -sn True -bn 50
+```
 
 ## License
 Copyright (C) 2018 João Marçal
