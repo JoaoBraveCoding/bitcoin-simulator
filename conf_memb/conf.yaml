@@ -1,0 +1,51 @@
+# Network type
+NUMBER_OF_NODES : 625
+NUMBER_OF_MINERS: 5
+EXTRA_REPLICAS: 0
+NEIGHBOURHOOD_SIZE: 8
+
+# Bad miners
+NUMBER_OF_BAD_NODES: 0
+
+# Hop configurations
+HOP_BASED_BROADCAST: True
+TOP_NODES_SIZE: 1
+RANDOM_NODES_SIZE: 1
+TIMER_SOLUTION: True
+
+# Number of simulation cycles
+NUMBER_OF_CYCLES : 208800
+
+# Duration of node cycle
+NODE_CYCLE: 1250
+
+# Log configurations
+EXPERT_LOG: True
+
+# Transactions configurations
+NUMB_TX_PER_CYCLE: 2
+MIN_TX_SIZE: 401
+MAX_TX_SIZE: 1498
+TX_ARRAY: False
+
+# Block specifications
+MAX_BLOCK_SIZE: 1000000
+
+# system settings, optional
+# whether to consider churn or not
+#CHURN : False
+# the churn rate in the interval [0,1[
+#CHURN_RATE : 0.05
+# message loss in the interval [0,1[
+#MESSASE_LOSS: 0.0
+
+NODE_DRIFT: 0
+# link latency,
+# it can be a constant
+LATENCY_TABLE: 100
+# or some arbitrary matrix containing point-to-point latencies
+# below is a sample of latencies obtained from PlanetLab.
+# nodes are uniformly distributed across that matrix
+#LATENCY_TABLE: data/latencies.obj
+#latency drift, in the inteval [0,1[ to introduce variablity in end to end latency
+LATENCY_DRIFT: None
