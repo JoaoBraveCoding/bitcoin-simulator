@@ -1,17 +1,24 @@
 # Network type
 NUMBER_OF_NODES : 625
+
+#Number of actual miners
 NUMBER_OF_MINERS: 5
+
+#Number of extra replicas for each miners
 EXTRA_REPLICAS: 0
+
+# Minimum neighbourhood size of each node
 NEIGHBOURHOOD_SIZE: 8
 
-# Bad miners
+# Bad nodes, percentage of nodes that do not relay transactions to other nodes
 NUMBER_OF_BAD_NODES: 0
 
-# Hop configurations
-HOP_BASED_BROADCAST: True
-TOP_NODES_SIZE: 1
-RANDOM_NODES_SIZE: 1
-TIMER_SOLUTION: True
+# Configurations related with my improvement to the protocol
+# If HOP_BASED_BROADCAST = False the simulator will behave like the usual Bitcoin
+HOP_BASED_BROADCAST: False
+TOP_NODES_SIZE: 0
+RANDOM_NODES_SIZE: 0
+TIMER_SOLUTION: False
 
 # Number of simulation cycles
 NUMBER_OF_CYCLES : 208800
@@ -19,7 +26,7 @@ NUMBER_OF_CYCLES : 208800
 # Duration of node cycle
 NODE_CYCLE: 1250
 
-# Log configurations
+# Log configurations discard the fist and last 5 hours of simulation
 EXPERT_LOG: True
 
 # Transactions configurations

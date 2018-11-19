@@ -167,8 +167,9 @@ def CYCLE(myself):
     if myself not in nodeState:
         return
 
-    if myself == 0 and nodeState[myself][CURRENT_CYCLE] == 61200:
-        miners = random.sample(xrange(nb_nodes), 5)
+    # Change miners during simulation simulation
+#    if myself == 0 and nodeState[myself][CURRENT_CYCLE] == 61200:
+#        miners = random.sample(xrange(nb_nodes), 5)
 #        for i in range(0, 2):
 #            miners.pop()
 #        nodes_to_append = random.sample(xrange(nb_nodes), 2)
